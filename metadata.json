@@ -1,0 +1,6 @@
+{
+  "name": "Connect Pro",
+  "description": "Comprehensive Lead & Call Management System with role-based dashboards, call fake detection, and automated reporting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
