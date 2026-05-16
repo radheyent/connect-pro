@@ -1005,7 +1005,7 @@ Employee: ${profile.name}`;
                       <Clock className="h-5 w-5 text-amber-600" />
                       <div>
                           <p className="text-[10px] font-bold text-amber-700 uppercase">Next Follow-up</p>
-                          <p className="text-sm font-bold text-amber-900">{format(new Date(activeLead.follow_up_date), 'PPP text-amber-900')} - {activeLead.follow_up_time}</p>
+                          <p className="text-sm font-bold text-amber-900">{format(new Date(activeLead.follow_up_date), 'PPP')} - {activeLead.follow_up_time}</p>
                       </div>
                   </div>
               )}
