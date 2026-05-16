@@ -45,29 +45,27 @@ const ReportsPage: React.FC = () => {
         return;
       }
 
+      // Separate queries - reverse joins not supported in Supabase PostgREST
       const { data: users, error: usersError } = await supabase
-        .from('user_profiles')
-        .select(`
-          id,
-          name,
-          role,
-          leads:leads(id, status),
-          calls:call_attempts(id, fake_call),
-          wa_shares:whatsapp_messages(id)
-        `)
-        .eq('is_active', true);
-
+        .from('user_profiles').select('id, name, role').eq('is_active', true);
       if (usersError) throw usersError;
 
-      const stats = users.map((u: any) => ({
+      const { data: allLeads } = await supabase
+        .from('leads').select('id, status, assigned_to');
+      const { data: allCalls } = await supabase
+        .from('call_attempts').select('id, fake_call, user_id');
+      const { data: allWA } = await supabase
+        .from('whatsapp_messages').select('id, user_id');
+
+      const stats = (users || []).map((u: any) => ({
         id: u.id,
         name: u.name,
         role: u.role,
-        totalAssigned: u.leads?.length || 0,
-        genuineCalls: u.calls?.filter((c: any) => !c.fake_call).length || 0,
-        fakeCalls: u.calls?.filter((c: any) => c.fake_call).length || 0,
-        completions: u.leads?.filter((l: any) => l.status === 'Complete').length || 0,
-        waShares: u.wa_shares?.length || 0
+        totalAssigned: allLeads?.filter((l: any) => l.assigned_to === u.id).length || 0,
+        genuineCalls: allCalls?.filter((c: any) => c.user_id === u.id && !c.fake_call).length || 0,
+        fakeCalls: allCalls?.filter((c: any) => c.user_id === u.id && c.fake_call).length || 0,
+        completions: allLeads?.filter((l: any) => l.assigned_to === u.id && l.status === 'Complete').length || 0,
+        waShares: allWA?.filter((w: any) => w.user_id === u.id).length || 0
       }));
 
       setReports(stats);

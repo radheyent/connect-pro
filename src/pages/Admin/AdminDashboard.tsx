@@ -63,24 +63,26 @@ const AdminDashboard: React.FC = () => {
         fakeCalls: fakeCallsCount || 0
       });
 
-      // Fetch employee performance (Simplified aggregation)
-      const { data: profilePerformance } = await supabase
-        .from('user_profiles')
-        .select(`
-          name,
-          leads:leads(id, status),
-          calls:call_attempts(id, fake_call)
-        `)
-        .eq('role', 'employee');
+      // Fetch employee performance - separate queries
+      const { data: employees } = await supabase
+        .from('user_profiles').select('id, name').eq('role', 'employee');
+      const { data: allLeads } = await supabase
+        .from('leads').select('id, status, assigned_to');
+      const { data: allCalls } = await supabase
+        .from('call_attempts').select('id, fake_call, user_id');
 
-      if (profilePerformance) {
-        const perf = profilePerformance.map((p: any) => ({
-          name: p.name,
-          leads: p.leads?.length || 0,
-          completed: p.leads?.filter((l: any) => l.status === 'Complete').length || 0,
-          genuine: p.calls?.filter((c: any) => !c.fake_call).length || 0,
-          fake: p.calls?.filter((c: any) => c.fake_call).length || 0
-        }));
+      if (employees) {
+        const perf = employees.map((emp: any) => {
+          const empLeads = allLeads?.filter((l: any) => l.assigned_to === emp.id) || [];
+          const empCalls = allCalls?.filter((c: any) => c.user_id === emp.id) || [];
+          return {
+            name: emp.name,
+            leads: empLeads.length,
+            completed: empLeads.filter((l: any) => l.status === 'Complete').length,
+            genuine: empCalls.filter((c: any) => !c.fake_call).length,
+            fake: empCalls.filter((c: any) => c.fake_call).length
+          };
+        });
         setEmployeePerformance(perf);
       }
 

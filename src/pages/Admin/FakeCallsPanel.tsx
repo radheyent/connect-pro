@@ -61,12 +61,27 @@ const FakeCallsPanel: React.FC = () => {
       }
 
       // Fetch leads who have a fake call attempt and are not complete
-      const { data, error } = await supabase
-        .from('leads')
-        .select('*, assigned_user:user_profiles!assigned_to(name), call_attempts!inner(duration_seconds, fake_call, created_at)')
-        .eq('call_attempts.fake_call', true)
-        .neq('status', 'Complete')
-        .order('last_call_date', { ascending: false });
+      // Fixed: use separate query instead of inner join filter
+      const { data: fakeCalls } = await supabase
+        .from('call_attempts')
+        .select('lead_id')
+        .eq('fake_call', true);
+
+      const fakeLeadIds = [...new Set((fakeCalls || []).map((c: any) => c.lead_id))];
+
+      let data = null, error = null;
+      if (fakeLeadIds.length > 0) {
+        const res = await supabase
+          .from('leads')
+          .select('*, assigned_user:user_profiles!leads_assigned_to_fkey(name)')
+          .in('id', fakeLeadIds)
+          .neq('status', 'Complete')
+          .order('last_call_date', { ascending: false });
+        data = res.data;
+        error = res.error;
+      } else {
+        data = [];
+      }
 
       if (error) throw error;
       

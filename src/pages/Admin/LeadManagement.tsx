@@ -109,7 +109,7 @@ const LeadManagement: React.FC = () => {
     try {
       const { data: leadsData, error: leadsError } = await supabase
         .from('leads')
-        .select('*, assigned_user:user_profiles!assigned_to(*)')
+        .select('*, assigned_user:user_profiles!leads_assigned_to_fkey(*)')
         .order('created_date', { ascending: false });
 
       const { data: empData, error: empError } = await supabase

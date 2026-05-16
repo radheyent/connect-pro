@@ -53,7 +53,7 @@ const AnnouncementsPage: React.FC = () => {
     try {
       const { data, error } = await supabase
         .from('announcements')
-        .select('*, user_profiles(name)')
+        .select('*, creator:user_profiles!announcements_created_by_fkey(name)')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -190,7 +190,7 @@ const AnnouncementsPage: React.FC = () => {
                 <CardDescription className="flex items-center gap-4 mt-1">
                   <span className="flex items-center gap-1">
                     <User className="h-3 w-3" />
-                    {ann.user_profiles?.name || 'Administrator'}
+                    {ann.creator?.name || 'Administrator'}
                   </span>
                   <span className="flex items-center gap-1">
                     <Calendar className="h-3 w-3" />
