@@ -63,25 +63,15 @@ const AdminDashboard: React.FC = () => {
         fakeCalls: fakeCallsCount || 0
       });
 
-      // Fetch employee performance - separate queries
-      const { data: employees } = await supabase
-        .from('user_profiles').select('id, name').eq('role', 'employee');
-      const { data: allLeads } = await supabase
-        .from('leads').select('id, status, assigned_to');
-      const { data: allCalls } = await supabase
-        .from('call_attempts').select('id, fake_call, user_id');
-
-      if (employees) {
-        const perf = employees.map((emp: any) => {
-          const empLeads = allLeads?.filter((l: any) => l.assigned_to === emp.id) || [];
-          const empCalls = allCalls?.filter((c: any) => c.user_id === emp.id) || [];
-          return {
-            name: emp.name,
-            leads: empLeads.length,
-            completed: empLeads.filter((l: any) => l.status === 'Complete').length,
-            genuine: empCalls.filter((c: any) => !c.fake_call).length,
-            fake: empCalls.filter((c: any) => c.fake_call).length
-          };
+      // Separate queries (reverse joins not supported in PostgREST)
+      const { data: emps } = await supabase.from('user_profiles').select('id,name').eq('role','employee');
+      const { data: allL } = await supabase.from('leads').select('id,status,assigned_to');
+      const { data: allC } = await supabase.from('call_attempts').select('id,fake_call,user_id');
+      if (emps) {
+        const perf = emps.map((emp: any) => {
+          const eLeads = (allL||[]).filter((l:any)=>l.assigned_to===emp.id);
+          const eCalls = (allC||[]).filter((c:any)=>c.user_id===emp.id);
+          return { name: emp.name, leads: eLeads.length, completed: eLeads.filter((l:any)=>l.status==='Complete').length, genuine: eCalls.filter((c:any)=>!c.fake_call).length, fake: eCalls.filter((c:any)=>c.fake_call).length };
         });
         setEmployeePerformance(perf);
       }

@@ -51,13 +51,23 @@ const AnnouncementsPage: React.FC = () => {
   const fetchAnnouncements = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('announcements')
-        .select('*, creator:user_profiles!announcements_created_by_fkey(name)')
+      const { data: annData, error } = await supabase
+        .from('announcements').select('*')
         .order('created_at', { ascending: false });
-
       if (error) throw error;
-      setAnnouncements(data || []);
+
+      // Get creator names separately
+      const creatorIds = [...new Set((annData||[]).map((a:any)=>a.created_by).filter(Boolean))];
+      let nameMap: Record<string,string> = {};
+      if (creatorIds.length > 0) {
+        const { data: profiles } = await supabase.from('user_profiles').select('id,name').in('id', creatorIds);
+        (profiles||[]).forEach((p:any)=>{ nameMap[p.id]=p.name; });
+      }
+      const enriched = (annData||[]).map((a:any)=>({
+        ...a,
+        user_profiles: a.created_by ? { name: nameMap[a.created_by]||'Admin' } : null
+      }));
+      setAnnouncements(enriched);
     } catch (error) {
       toast.error('Failed to fetch announcements');
     } finally {
@@ -190,7 +200,7 @@ const AnnouncementsPage: React.FC = () => {
                 <CardDescription className="flex items-center gap-4 mt-1">
                   <span className="flex items-center gap-1">
                     <User className="h-3 w-3" />
-                    {ann.creator?.name || 'Administrator'}
+                    {ann.user_profiles?.name || 'Administrator'}
                   </span>
                   <span className="flex items-center gap-1">
                     <Calendar className="h-3 w-3" />

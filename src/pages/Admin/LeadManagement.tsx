@@ -109,7 +109,7 @@ const LeadManagement: React.FC = () => {
     try {
       const { data: leadsData, error: leadsError } = await supabase
         .from('leads')
-        .select('*, assigned_user:user_profiles!leads_assigned_to_fkey(*)')
+        .select('id,name,phone,matching_number,current_operator,status,assigned_to,important,created_date,notes,pending_recall,follow_up_date,follow_up_time,last_call_date,last_call_duration')
         .order('created_date', { ascending: false });
 
       const { data: empData, error: empError } = await supabase
@@ -119,7 +119,14 @@ const LeadManagement: React.FC = () => {
 
       if (leadsError || empError) throw leadsError || empError;
       
-      setLeads(leadsData || []);
+      // Enrich leads with assigned user name
+      const empMap: Record<string,string> = {};
+      (empData||[]).forEach((e:any)=>{ empMap[e.id]=e.name; });
+      const enriched = (leadsData||[]).map((l:any)=>({
+        ...l,
+        assigned_user: l.assigned_to ? { name: empMap[l.assigned_to]||'Unknown' } : null
+      }));
+      setLeads(enriched);
       setEmployees(empData || []);
     } catch (error: any) {
       toast.error('Failed to fetch data');

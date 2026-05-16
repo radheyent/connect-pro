@@ -45,27 +45,21 @@ const ReportsPage: React.FC = () => {
         return;
       }
 
-      // Separate queries - reverse joins not supported in Supabase PostgREST
       const { data: users, error: usersError } = await supabase
-        .from('user_profiles').select('id, name, role').eq('is_active', true);
+        .from('user_profiles').select('id,name,role').eq('is_active', true);
       if (usersError) throw usersError;
 
-      const { data: allLeads } = await supabase
-        .from('leads').select('id, status, assigned_to');
-      const { data: allCalls } = await supabase
-        .from('call_attempts').select('id, fake_call, user_id');
-      const { data: allWA } = await supabase
-        .from('whatsapp_messages').select('id, user_id');
+      const { data: allLeads } = await supabase.from('leads').select('id,status,assigned_to');
+      const { data: allCalls } = await supabase.from('call_attempts').select('id,fake_call,user_id');
+      const { data: allWA } = await supabase.from('whatsapp_messages').select('id,user_id');
 
-      const stats = (users || []).map((u: any) => ({
-        id: u.id,
-        name: u.name,
-        role: u.role,
-        totalAssigned: allLeads?.filter((l: any) => l.assigned_to === u.id).length || 0,
-        genuineCalls: allCalls?.filter((c: any) => c.user_id === u.id && !c.fake_call).length || 0,
-        fakeCalls: allCalls?.filter((c: any) => c.user_id === u.id && c.fake_call).length || 0,
-        completions: allLeads?.filter((l: any) => l.assigned_to === u.id && l.status === 'Complete').length || 0,
-        waShares: allWA?.filter((w: any) => w.user_id === u.id).length || 0
+      const stats = (users||[]).map((u: any) => ({
+        id: u.id, name: u.name, role: u.role,
+        totalAssigned: (allLeads||[]).filter((l:any)=>l.assigned_to===u.id).length,
+        genuineCalls: (allCalls||[]).filter((c:any)=>c.user_id===u.id&&!c.fake_call).length,
+        fakeCalls: (allCalls||[]).filter((c:any)=>c.user_id===u.id&&c.fake_call).length,
+        completions: (allLeads||[]).filter((l:any)=>l.assigned_to===u.id&&l.status==='Complete').length,
+        waShares: (allWA||[]).filter((w:any)=>w.user_id===u.id).length
       }));
 
       setReports(stats);

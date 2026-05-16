@@ -44,7 +44,7 @@ const FieldBoyDashboard: React.FC = () => {
     try {
       const { data, error } = await supabase
         .from('leads')
-        .select('*, assigned_user:user_profiles!leads_assigned_to_fkey(name)')
+        .select('*')
         .in('status', ['Interested', 'Not Connected'])
         .order('important', { ascending: false });
 

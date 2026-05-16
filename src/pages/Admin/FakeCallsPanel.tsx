@@ -60,34 +60,35 @@ const FakeCallsPanel: React.FC = () => {
         return;
       }
 
-      // Fetch leads who have a fake call attempt and are not complete
-      // Fixed: use separate query instead of inner join filter
-      const { data: fakeCalls } = await supabase
-        .from('call_attempts')
-        .select('lead_id')
-        .eq('fake_call', true);
+      // Step 1: Get lead IDs that have fake calls
+      const { data: fakeCalls, error: fcError } = await supabase
+        .from('call_attempts').select('lead_id').eq('fake_call', true);
+      if (fcError) throw fcError;
 
-      const fakeLeadIds = [...new Set((fakeCalls || []).map((c: any) => c.lead_id))];
+      const fakeLeadIds = [...new Set((fakeCalls||[]).map((c:any)=>c.lead_id))];
+      if (fakeLeadIds.length === 0) { setLeads([]); return; }
 
-      let data = null, error = null;
-      if (fakeLeadIds.length > 0) {
-        const res = await supabase
-          .from('leads')
-          .select('*, assigned_user:user_profiles!leads_assigned_to_fkey(name)')
-          .in('id', fakeLeadIds)
-          .neq('status', 'Complete')
-          .order('last_call_date', { ascending: false });
-        data = res.data;
-        error = res.error;
-      } else {
-        data = [];
+      // Step 2: Get those leads (simple select, no join)
+      const { data: leadsData, error: leadsError } = await supabase
+        .from('leads').select('*')
+        .in('id', fakeLeadIds)
+        .neq('status', 'Complete')
+        .order('last_call_date', { ascending: false });
+      if (leadsError) throw leadsError;
+
+      // Step 3: Get assigned user names separately
+      const assignedIds = [...new Set((leadsData||[]).map((l:any)=>l.assigned_to).filter(Boolean))];
+      let nameMap: Record<string,string> = {};
+      if (assignedIds.length > 0) {
+        const { data: profiles } = await supabase.from('user_profiles').select('id,name').in('id', assignedIds);
+        (profiles||[]).forEach((p:any)=>{ nameMap[p.id]=p.name; });
       }
 
-      if (error) throw error;
-      
-      // Filter unique leads (in case multiple fake calls)
-      const uniqueLeads = Array.from(new Map(data.map(item => [item.id, item])).values());
-      setLeads(uniqueLeads);
+      const enriched = (leadsData||[]).map((l:any)=>({
+        ...l,
+        assigned_user: l.assigned_to ? { name: nameMap[l.assigned_to]||'Unknown' } : null
+      }));
+      setLeads(enriched);
     } catch (error: any) {
       toast.error('Failed to fetch fake call leads');
     } finally {
