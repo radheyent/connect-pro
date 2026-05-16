@@ -17,10 +17,12 @@ import { TooltipProvider } from './components/ui/tooltip';
 const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) => {
   const { user, profile, loading } = useAuth();
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',fontSize:'16px',color:'#64748b'}}>Loading...</div>;
   if (!user) return <Navigate to="/login" replace />;
+  // User hai but profile abhi load ho rahi hai — wait karo
+  if (!profile) return <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',fontSize:'16px',color:'#64748b'}}>Loading profile...</div>;
 
-  if (allowedRoles && profile && !allowedRoles.includes(profile.role)) {
+  if (allowedRoles && !allowedRoles.includes(profile.role)) {
     return <Navigate to="/" replace />;
   }
 
@@ -28,8 +30,10 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
 };
 
 const RoleRedirect = () => {
-  const { profile, loading } = useAuth();
-  if (loading) return <div>Loading...</div>;
+  const { user, profile, loading } = useAuth();
+  if (loading) return <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',fontSize:'16px',color:'#64748b'}}>Loading...</div>;
+  // User hai but profile abhi aa rahi hai — login pe mat bhejo
+  if (user && !profile) return <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',fontSize:'16px',color:'#64748b'}}>Loading profile...</div>;
   if (!profile) return <Navigate to="/login" replace />;
 
   switch (profile.role) {
