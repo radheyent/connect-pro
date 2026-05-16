@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { supabase, UserProfile } from '@/lib/supabase';
+import { supabase, UserProfile, isSupabaseConfigured } from '@/lib/supabase';
 import { User } from '@supabase/supabase-js';
 
 interface AuthContextType {
@@ -14,73 +14,51 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  // loading = true sirf tab tak jab tak hum session aur profile dono check na kar lein
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const init = async () => {
-      try {
-        // Step 1: current session lo
-        const { data: { session } } = await supabase.auth.getSession();
-
-        if (cancelled) return;
-
-        if (session?.user) {
-          setUser(session.user);
-          // Step 2: profile fetch karo
-          const { data } = await supabase
-            .from('user_profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
-
-          if (!cancelled) {
-            setProfile(data ?? null);
-          }
-        }
-      } catch (e) {
-        console.error('Auth init error:', e);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-
-    init();
-
-    // Auth changes sunna (login/logout ke baad)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (cancelled) return;
-
-      if (event === 'SIGNED_OUT') {
-        setUser(null);
-        setProfile(null);
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        fetchProfile(session.user.id);
+      } else {
         setLoading(false);
-        return;
-      }
-
-      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
-        setUser(session.user);
-        // Profile fetch - loading mat lagao yahan (already on dashboard ya loading screen pe hain)
-        const { data } = await supabase
-          .from('user_profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-
-        if (!cancelled) setProfile(data ?? null);
       }
     });
 
-    return () => {
-      cancelled = true;
-      subscription.unsubscribe();
-    };
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        fetchProfile(session.user.id);
+      } else {
+        setProfile(null);
+        setLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
+  const fetchProfile = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (error) throw error;
+      setProfile(data);
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const signOut = async () => {
-    setLoading(true);
     await supabase.auth.signOut();
   };
 
