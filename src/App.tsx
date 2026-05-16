@@ -17,11 +17,16 @@ import { TooltipProvider } from './components/ui/tooltip';
 const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) => {
   const { user, profile, loading } = useAuth();
 
-  if (loading) return <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',fontSize:'16px',color:'#64748b'}}>Loading...</div>;
-  if (!user) return <Navigate to="/login" replace />;
-  // User hai but profile abhi load ho rahi hai — wait karo
-  if (!profile) return <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',fontSize:'16px',color:'#64748b'}}>Loading profile...</div>;
+  // Auth check ho rahi hai — wait karo
+  if (loading) return <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',fontFamily:'sans-serif',color:'#64748b'}}>Loading...</div>;
 
+  // Login nahi hai
+  if (!user) return <Navigate to="/login" replace />;
+
+  // User hai, profile nahi aayi (RLS ya network issue) — login pe bhejo
+  if (!profile) return <Navigate to="/login" replace />;
+
+  // Role check
   if (allowedRoles && !allowedRoles.includes(profile.role)) {
     return <Navigate to="/" replace />;
   }
@@ -31,20 +36,16 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
 
 const RoleRedirect = () => {
   const { user, profile, loading } = useAuth();
-  if (loading) return <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',fontSize:'16px',color:'#64748b'}}>Loading...</div>;
-  // User hai but profile abhi aa rahi hai — login pe mat bhejo
-  if (user && !profile) return <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',fontSize:'16px',color:'#64748b'}}>Loading profile...</div>;
-  if (!profile) return <Navigate to="/login" replace />;
+
+  if (loading) return <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',fontFamily:'sans-serif',color:'#64748b'}}>Loading...</div>;
+
+  if (!user || !profile) return <Navigate to="/login" replace />;
 
   switch (profile.role) {
-    case 'admin':
-      return <Navigate to="/admin" replace />;
-    case 'field_boy':
-      return <Navigate to="/field-boy" replace />;
-    case 'employee':
-      return <Navigate to="/employee" replace />;
-    default:
-      return <Navigate to="/login" replace />;
+    case 'admin':    return <Navigate to="/admin" replace />;
+    case 'field_boy': return <Navigate to="/field-boy" replace />;
+    case 'employee': return <Navigate to="/employee" replace />;
+    default:         return <Navigate to="/login" replace />;
   }
 };
 

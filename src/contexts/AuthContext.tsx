@@ -14,48 +14,73 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  // loading = true sirf tab tak jab tak hum session aur profile dono check na kar lein
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      if (error) {
-        console.error('Profile fetch error:', error);
-        setProfile(null);
-      } else {
-        setProfile(data);
-      }
-    } catch (err) {
-      console.error('Profile fetch exception:', err);
-      setProfile(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    // onAuthStateChange INITIAL_SESSION bhi fire karta hai — yahi use karo
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        setUser(session.user);
-        // setTimeout: Supabase auth token set hone ka time do
-        setTimeout(() => fetchProfile(session.user.id), 0);
-      } else {
+    let cancelled = false;
+
+    const init = async () => {
+      try {
+        // Step 1: current session lo
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (cancelled) return;
+
+        if (session?.user) {
+          setUser(session.user);
+          // Step 2: profile fetch karo
+          const { data } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+
+          if (!cancelled) {
+            setProfile(data ?? null);
+          }
+        }
+      } catch (e) {
+        console.error('Auth init error:', e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    init();
+
+    // Auth changes sunna (login/logout ke baad)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (cancelled) return;
+
+      if (event === 'SIGNED_OUT') {
         setUser(null);
         setProfile(null);
         setLoading(false);
+        return;
+      }
+
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+        setUser(session.user);
+        // Profile fetch - loading mat lagao yahan (already on dashboard ya loading screen pe hain)
+        const { data } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+
+        if (!cancelled) setProfile(data ?? null);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signOut = async () => {
+    setLoading(true);
     await supabase.auth.signOut();
   };
 
