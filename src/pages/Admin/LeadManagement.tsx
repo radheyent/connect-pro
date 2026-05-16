@@ -108,18 +108,13 @@ const LeadManagement: React.FC = () => {
     setLoading(true);
     try {
       const { data: leadsData, error: leadsError } = await supabase
-        .from('leads')
-        .select('id,name,phone,matching_number,current_operator,status,assigned_to,important,created_date,notes,pending_recall,follow_up_date,follow_up_time,last_call_date,last_call_duration')
-        .order('created_date', { ascending: false });
+        .from('leads').select('*').order('created_date', { ascending: false });
 
       const { data: empData, error: empError } = await supabase
-        .from('user_profiles')
-        .select('*')
-        .eq('is_active', true);
+        .from('user_profiles').select('*').eq('is_active', true);
 
       if (leadsError || empError) throw leadsError || empError;
-      
-      // Enrich leads with assigned user name
+
       const empMap: Record<string,string> = {};
       (empData||[]).forEach((e:any)=>{ empMap[e.id]=e.name; });
       const enriched = (leadsData||[]).map((l:any)=>({
@@ -147,6 +142,32 @@ const LeadManagement: React.FC = () => {
     }
   };
 
+  const handleDeleteSingle = async (leadId: string) => {
+    if (!window.confirm('Are you sure you want to delete this lead? This cannot be undone.')) return;
+    try {
+      const { error } = await supabase.from('leads').delete().eq('id', leadId);
+      if (error) throw error;
+      toast.success('Lead deleted');
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedLeads.length === 0) return;
+    if (!window.confirm(`Delete ${selectedLeads.length} selected leads? This cannot be undone.`)) return;
+    try {
+      const { error } = await supabase.from('leads').delete().in('id', selectedLeads);
+      if (error) throw error;
+      toast.success(`${selectedLeads.length} leads deleted`);
+      setSelectedLeads([]);
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message);
+    }
+  };
+
   const handleBulkAssign = async () => {
     if (!assigneeId || selectedLeads.length === 0) return;
     try {
@@ -167,22 +188,52 @@ const LeadManagement: React.FC = () => {
 
   const handleFileUpload = async () => {
     if (!uploadFile) return;
-    const formData = new FormData();
-    formData.append('file', uploadFile);
-
     try {
-      const res = await fetch('/api/admin/leads/bulk-upload', {
-        method: 'POST',
-        body: formData,
-      });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error);
+      // Parse file client-side using xlsx
+      const XLSX = await import('xlsx');
+      const buffer = await uploadFile.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: 'array' });
+      const rows: any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
 
-      toast.success(`Successfully uploaded ${result.count} leads`);
+      if (rows.length === 0) { toast.error('File is empty'); return; }
+
+      // Build employee lookup map (by name and email)
+      const empNameMap: Record<string, string> = {};
+      const empEmailMap: Record<string, string> = {};
+      employees.forEach((e: any) => {
+        if (e.name) empNameMap[e.name.trim().toLowerCase()] = e.id;
+        if (e.email) empEmailMap[e.email.trim().toLowerCase()] = e.id;
+      });
+
+      const leadsToInsert = rows.map((r: any) => {
+        const assignedName = String(r.AssignedTo || r.assigned_to || r['Assigned To'] || '').trim().toLowerCase();
+        let assignedId: string | null = null;
+        if (assignedName) {
+          assignedId = empNameMap[assignedName] || empEmailMap[assignedName] || null;
+        }
+        return {
+          name: r.Name || r.name || '',
+          phone: String(r.Phone || r.phone || ''),
+          matching_number: r.MatchingNumber || r.matching_number || null,
+          current_operator: r.CurrentOperator || r.current_operator || null,
+          status: r.Status || r.status || 'Not Connected',
+          notes: r.Notes || r.notes || null,
+          important: String(r.Important || r.important || '').toLowerCase() === 'true',
+          assigned_to: assignedId,
+          created_date: new Date().toISOString(),
+        };
+      }).filter((l: any) => l.name && l.phone);
+
+      if (leadsToInsert.length === 0) { toast.error('No valid leads found. Check Name and Phone columns.'); return; }
+
+      const { error } = await supabase.from('leads').insert(leadsToInsert);
+      if (error) throw error;
+
+      toast.success(`${leadsToInsert.length} leads uploaded successfully`);
       setIsUploadModalOpen(false);
       fetchData();
     } catch (error: any) {
-      toast.error(error.message);
+      toast.error(error.message || 'Upload failed');
     }
   };
 
@@ -229,9 +280,14 @@ const LeadManagement: React.FC = () => {
             <Upload className="h-4 w-4 mr-2" /> Bulk Upload
           </Button>
           {selectedLeads.length > 0 && (
-            <Button variant="secondary" onClick={() => setIsAssignModalOpen(true)} className="w-full lg:w-auto">
-              <UserPlus className="h-4 w-4 mr-2" /> Assign ({selectedLeads.length})
-            </Button>
+            <>
+              <Button variant="secondary" onClick={() => setIsAssignModalOpen(true)} className="w-full lg:w-auto">
+                <UserPlus className="h-4 w-4 mr-2" /> Assign ({selectedLeads.length})
+              </Button>
+              <Button variant="destructive" onClick={handleBulkDelete} className="w-full lg:w-auto">
+                <Trash2 className="h-4 w-4 mr-2" /> Delete ({selectedLeads.length})
+              </Button>
+            </>
           )}
         </div>
         <div className="flex gap-2 w-full lg:w-auto">
@@ -355,7 +411,7 @@ const LeadManagement: React.FC = () => {
                           <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-slate-100" onClick={() => handleOpenEdit(lead)}>
                               <Edit className="h-4 w-4 text-slate-500" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:bg-red-50">
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:bg-red-50" onClick={() => handleDeleteSingle(lead.id)}>
                               <Trash2 className="h-4 w-4" />
                           </Button>
                       </div>

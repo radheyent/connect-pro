@@ -32,6 +32,9 @@ const FieldBoyDashboard: React.FC = () => {
   const [search, setSearch] = useState('');
   
   const [isResubmitModalOpen, setIsResubmitModalOpen] = useState(false);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [detailLead, setDetailLead] = useState<any>(null);
+  const [empMap, setEmpMap] = useState<Record<string,string>>({});
   const [activeLead, setActiveLead] = useState<Lead | null>(null);
   const [resubmitReason, setResubmitReason] = useState('Resubmission');
 
@@ -43,12 +46,15 @@ const FieldBoyDashboard: React.FC = () => {
     setLoading(true);
     try {
       const { data, error } = await supabase
-        .from('leads')
-        .select('*')
-        .in('status', ['Interested', 'Not Connected'])
+        .from('leads').select('*').eq('status', 'Interested')
         .order('important', { ascending: false });
-
       if (error) throw error;
+
+      // Fetch employee names
+      const { data: emps } = await supabase.from('user_profiles').select('id,name');
+      const map: Record<string,string> = {};
+      (emps||[]).forEach((e:any) => { map[e.id] = e.name; });
+      setEmpMap(map);
       setLeads(data || []);
     } catch (error: any) {
       toast.error('Fetch failed');
@@ -161,14 +167,14 @@ const FieldBoyDashboard: React.FC = () => {
                   filteredLeads.map((lead) => (
                     <TableRow key={lead.id}>
                       <TableCell className="font-medium">
-                        <div className="flex items-center gap-2">
+                        <button className="flex items-center gap-2 hover:underline text-left" onClick={() => { setDetailLead({...lead, assigned_user_name: empMap[lead.assigned_to] || 'Unassigned'}); setIsDetailOpen(true); }}>
                           {lead.name}
                           {lead.important && <Badge variant="destructive" className="h-2 w-2 p-0 rounded-full" title="Important" />}
-                        </div>
+                        </button>
                       </TableCell>
                       <TableCell className="font-mono text-xs">{lead.phone}</TableCell>
                       <TableCell className="text-xs font-semibold text-slate-700">
-                        {(lead as any).assigned_user?.name || '--'}
+                        {empMap[lead.assigned_to] || '--'}
                       </TableCell>
                       <TableCell>
                         <Badge variant={lead.status === 'Interested' ? 'default' : 'secondary'} className="text-[10px]">
@@ -220,12 +226,45 @@ const FieldBoyDashboard: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* Lead Detail Modal */}
+      <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {detailLead?.name}
+              {detailLead?.important && <Badge variant="destructive" className="text-[10px]">Important</Badge>}
+            </DialogTitle>
+          </DialogHeader>
+          {detailLead && (
+            <div className="space-y-3 text-sm">
+              <div className="grid grid-cols-2 gap-3">
+                <div><p className="text-xs text-slate-400 uppercase">Phone</p><p className="font-mono font-bold">{detailLead.phone}</p></div>
+                <div><p className="text-xs text-slate-400 uppercase">Matching No.</p><p className="font-mono">{detailLead.matching_number || '—'}</p></div>
+                <div><p className="text-xs text-slate-400 uppercase">Operator</p><p>{detailLead.current_operator || '—'}</p></div>
+                <div><p className="text-xs text-slate-400 uppercase">Status</p><Badge variant="default" className="text-[10px]">{detailLead.status}</Badge></div>
+                <div><p className="text-xs text-slate-400 uppercase">Assigned Employee</p><p className="font-semibold text-blue-700">{detailLead.assigned_user_name}</p></div>
+                <div><p className="text-xs text-slate-400 uppercase">Created</p><p>{detailLead.created_date ? format(new Date(detailLead.created_date), 'dd MMM yyyy') : '—'}</p></div>
+                {detailLead.follow_up_date && (
+                  <div><p className="text-xs text-slate-400 uppercase">Follow-up</p><p>{format(new Date(detailLead.follow_up_date), 'dd MMM yyyy')} {detailLead.follow_up_time || ''}</p></div>
+                )}
+              </div>
+              {detailLead.notes && (
+                <div><p className="text-xs text-slate-400 uppercase mb-1">Notes</p><p className="bg-slate-50 rounded p-2 text-xs">{detailLead.notes}</p></div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDetailOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={isResubmitModalOpen} onOpenChange={setIsResubmitModalOpen}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle>Resubmit Lead</DialogTitle>
             <DialogDescription>
-              This lead will be returned to {(activeLead as any)?.assigned_user?.name || 'the employee'} as a Follow-up.
+              This lead will be returned to {activeLead ? (empMap[activeLead.assigned_to] || 'the employee') : ''} as a Follow-up.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
