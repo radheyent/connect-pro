@@ -101,7 +101,7 @@ const EmployeeLeadsPage: React.FC = () => {
     toast.success(`Hurray!! Good News ${employeeName} Closed the Lead! 🌟`, {
       description: details,
       position: 'top-center',
-      duration: 5000,
+      duration: 10000,
     });
   };
 
@@ -182,7 +182,7 @@ const EmployeeLeadsPage: React.FC = () => {
     if (!activeLead || !callStartTime) return;
     
     const duration = Math.floor((Date.now() - callStartTime) / 1000);
-    const isFake = duration < 5;
+    const isFake = duration < 10;
 
     try {
       await supabase.from('call_attempts').insert({
@@ -206,7 +206,7 @@ const EmployeeLeadsPage: React.FC = () => {
       }).eq('id', activeLead.id);
 
       if (isFake) {
-        toast.warning('Warning: Call duration < 5s. Logged as potential fake call.');
+        toast.warning('Warning: Call duration < 10s. Logged as potential fake call.');
       } else {
         toast.success('Call attempt logged successfully.');
       }
