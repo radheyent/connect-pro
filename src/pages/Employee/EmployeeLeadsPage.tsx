@@ -283,7 +283,10 @@ Employee: ${profile.name}`;
 
   const filteredLeads = leads.filter(l => {
     const matchesSearch = l.name.toLowerCase().includes(search.toLowerCase()) || l.phone.includes(search);
-    const matchesTab = filterTab === 'All' ? true : l.status === filterTab;
+    const matchesTab =
+      filterTab === 'All'
+        ? (l.status === 'Not Connected' || l.status === 'Pending Recall' || l.pending_recall === true)
+        : l.status === filterTab;
     return matchesSearch && matchesTab;
   });
 

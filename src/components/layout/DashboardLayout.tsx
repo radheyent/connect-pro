@@ -1,5 +1,6 @@
 import React from 'react';
 import CelebrationSystem, { RecentActivityPanel } from '@/components/CelebrationSystem';
+import PWAInstallButton from '@/components/PWAInstallButton';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
@@ -137,6 +138,7 @@ const DashboardLayout: React.FC = () => {
             <Button variant="ghost" size="icon" onClick={toggleDarkMode}>
               {isDarkMode ? <Sun className="h-5 w-5 text-slate-500" /> : <Moon className="h-5 w-5 text-slate-500" />}
             </Button>
+            <PWAInstallButton />
             <div className="relative hidden sm:block">
               <button
                 onClick={() => setShowActivity(v => !v)}

@@ -112,13 +112,12 @@ export const RecentActivityPanel: React.FC = () => {
 
   const fetchActivity = useCallback(async () => {
     try {
-      // Completed sales
+      // Completed sales - use completed_date OR last_call_date as fallback
       const { data: sales } = await supabase
         .from('leads')
-        .select('id, name, assigned_to, completed_date')
+        .select('id, name, assigned_to, completed_date, last_call_date')
         .eq('status', 'Complete')
-        .not('completed_date', 'is', null)
-        .order('completed_date', { ascending: false })
+        .order('last_call_date', { ascending: false })
         .limit(5);
 
       // Employee names
@@ -138,7 +137,7 @@ export const RecentActivityPanel: React.FC = () => {
         id: `s-${s.id}`, type: 'sale',
         title: `🏆 ${empMap[s.assigned_to] || 'Employee'} closed a sale!`,
         subtitle: s.name,
-        time: s.completed_date,
+        time: s.completed_date || s.last_call_date || new Date().toISOString(),
       }));
 
       const annItems: ActivityItem[] = (anns || []).map((a: any) => ({
@@ -235,8 +234,7 @@ const CelebrationSystem: React.FC = () => {
         .from('leads')
         .select('id, name, assigned_to, completed_date')
         .eq('status', 'Complete')
-        .not('completed_date', 'is', null)
-        .gte('completed_date', lastChecked.current)
+        .gte('last_call_date', lastChecked.current)
         .order('completed_date', { ascending: false })
         .limit(5);
 
