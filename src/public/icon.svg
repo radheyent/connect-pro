@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="112" fill="#1e293b"/>
+
+  <!-- C shape (Connect) -->
+  <path d="M 290 130
+             A 145 145 0 1 0 290 382
+             L 290 322
+             A 85 85 0 1 1 290 190
+             Z"
+        fill="#3b82f6"/>
+
+  <!-- Lightning bolt (Pro / Speed) -->
+  <polygon points="295,145 245,275 285,275 255,375 345,230 300,230 335,145"
+           fill="#f59e0b"/>
+</svg>
