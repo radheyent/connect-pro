@@ -9,7 +9,7 @@ import { format, formatDistanceToNow } from 'date-fns';
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface ActivityItem {
   id: string;
-  type: 'sale' | 'announcement';
+  type: 'sale' | 'announcement' | 'call';
   title: string;
   subtitle: string;
   time: string;
@@ -107,12 +107,16 @@ const CelebrationOverlay: React.FC<{ data: CelebrationData; onClose: () => void 
 
 // ─── Recent Activity Panel ────────────────────────────────────────────────────
 export const RecentActivityPanel: React.FC = () => {
+  const { user, profile } = useAuth();
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchActivity = useCallback(async () => {
+    if (!user || !profile) return;
     try {
-      // Completed sales - use completed_date OR last_call_date as fallback
+      const activityItems: ActivityItem[] = [];
+
+      // TYPE 1: Sales closed by any employee (Last 5)
       const { data: sales } = await supabase
         .from('leads')
         .select('id, name, assigned_to, completed_date, last_call_date')
@@ -120,71 +124,109 @@ export const RecentActivityPanel: React.FC = () => {
         .order('last_call_date', { ascending: false })
         .limit(5);
 
-      // Employee names
-      const ids = [...new Set((sales || []).map((s: any) => s.assigned_to).filter(Boolean))];
+      const assignedIds = [...new Set((sales || []).map((s: any) => s.assigned_to).filter(Boolean))];
       const empMap: Record<string, string> = {};
-      if (ids.length) {
-        const { data: emps } = await supabase.from('user_profiles').select('id,name').in('id', ids);
+      if (assignedIds.length) {
+        const { data: emps } = await supabase.from('user_profiles').select('id,name').in('id', assignedIds);
         (emps || []).forEach((e: any) => { empMap[e.id] = e.name; });
       }
 
-      // Announcements
+      (sales || []).forEach((s: any) => {
+        const empName = empMap[s.assigned_to] || 'Employee';
+        const isMine = s.assigned_to === user.id;
+        activityItems.push({
+          id: `s-${s.id}`,
+          type: 'sale',
+          title: isMine
+            ? `🏆 You closed a sale! Well done ${profile.name}!`
+            : `🏆 ${empName} closed a sale! Well done ${empName}!`,
+          subtitle: `Customer: ${s.name}`,
+          time: s.completed_date || s.last_call_date || '',
+        });
+      });
+
+      // TYPE 2: Announcements (Last 5)
       const { data: anns } = await supabase
-        .from('announcements').select('id, title, created_at')
-        .order('created_at', { ascending: false }).limit(5);
+        .from('announcements')
+        .select('id, title, created_at')
+        .order('created_at', { ascending: false })
+        .limit(5);
 
-      const saleItems: ActivityItem[] = (sales || []).map((s: any) => ({
-        id: `s-${s.id}`, type: 'sale',
-        title: `🏆 ${empMap[s.assigned_to] || 'Employee'} closed a sale!`,
-        subtitle: s.name,
-        time: s.completed_date || s.last_call_date || new Date().toISOString(),
-      }));
+      (anns || []).forEach((a: any) => {
+        activityItems.push({
+          id: `a-${a.id}`,
+          type: 'announcement',
+          title: `📢 Admin made an announcement`,
+          subtitle: a.title,
+          time: a.created_at,
+        });
+      });
 
-      const annItems: ActivityItem[] = (anns || []).map((a: any) => ({
-        id: `a-${a.id}`, type: 'announcement',
-        title: `📢 New Announcement`,
-        subtitle: a.title,
-        time: a.created_at,
-      }));
+      // TYPE 3: Your last call (most recent call_attempt by this user)
+      const { data: myLastCall } = await supabase
+        .from('call_attempts')
+        .select('id, lead_id, created_at, duration_seconds')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1);
 
-      const merged = [...saleItems, ...annItems]
+      if (myLastCall && myLastCall.length > 0) {
+        const call = myLastCall[0];
+        const { data: lead } = await supabase
+          .from('leads')
+          .select('name, phone')
+          .eq('id', call.lead_id)
+          .single();
+
+        if (lead) {
+          activityItems.push({
+            id: `c-${call.id}`,
+            type: 'call',
+            title: `📞 You made last call to ${lead.name}`,
+            subtitle: `${lead.phone} • ${call.duration_seconds || 0}s`,
+            time: call.created_at,
+          });
+        }
+      }
+
+      // Sort all by time, take 5
+      const sorted = activityItems
+        .filter(i => i.time)
         .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
         .slice(0, 5);
 
-      setItems(merged);
+      setItems(sorted);
     } catch (e) {
       console.error('Activity fetch:', e);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user, profile]);
 
   useEffect(() => {
     fetchActivity();
-
-    // Realtime subscriptions
     const ch1 = supabase.channel('ra-leads')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leads' },
         (p) => { if (p.new?.status === 'Complete') fetchActivity(); })
       .subscribe();
-
     const ch2 = supabase.channel('ra-ann')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'announcements' }, fetchActivity)
       .subscribe();
-
-    // Polling fallback every 30s
+    const ch3 = supabase.channel('ra-calls')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_attempts' }, fetchActivity)
+      .subscribe();
     const poll = setInterval(fetchActivity, 30000);
-
     return () => {
       supabase.removeChannel(ch1);
       supabase.removeChannel(ch2);
+      supabase.removeChannel(ch3);
       clearInterval(poll);
     };
   }, [fetchActivity]);
 
   if (loading) return (
     <div className="space-y-2 p-1">
-      {[...Array(4)].map((_, i) => (
+      {[...Array(3)].map((_, i) => (
         <div key={i} className="h-14 bg-slate-100 rounded-xl animate-pulse" />
       ))}
     </div>
@@ -193,22 +235,24 @@ export const RecentActivityPanel: React.FC = () => {
   if (!items.length) return (
     <div className="text-center py-8">
       <Trophy className="h-8 w-8 text-slate-300 mx-auto mb-2" />
-      <p className="text-slate-400 text-sm">No activity yet</p>
-      <p className="text-slate-300 text-xs mt-1">Sales and announcements appear here</p>
+      <p className="text-slate-400 text-sm">No recent activity yet</p>
+      <p className="text-slate-300 text-xs mt-1">Start making calls to see activity here</p>
     </div>
   );
 
   return (
     <div className="space-y-2 max-h-80 overflow-y-auto">
       {items.map(item => (
-        <div key={item.id} className={`flex items-start gap-3 p-3 rounded-xl border transition-all ${
-          item.type === 'sale'
-            ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-100'
-            : 'bg-gradient-to-r from-blue-50 to-sky-50 border-blue-100'
+        <div key={item.id} className={`flex items-start gap-3 p-3 rounded-xl border ${
+          item.type === 'sale' ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-100'
+          : item.type === 'announcement' ? 'bg-gradient-to-r from-blue-50 to-sky-50 border-blue-100'
+          : 'bg-gradient-to-r from-slate-50 to-gray-50 border-slate-100'
         }`}>
           <div className="flex-1 min-w-0">
-            <p className={`text-xs font-bold truncate ${
-              item.type === 'sale' ? 'text-green-800' : 'text-blue-800'
+            <p className={`text-xs font-bold ${
+              item.type === 'sale' ? 'text-green-800'
+              : item.type === 'announcement' ? 'text-blue-800'
+              : 'text-slate-700'
             }`}>{item.title}</p>
             <p className="text-xs text-slate-500 truncate mt-0.5">{item.subtitle}</p>
           </div>

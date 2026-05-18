@@ -42,7 +42,7 @@ const EmployeeLeadsPage: React.FC = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterTab, setFilterTab] = useState<'All' | 'Interested' | 'Complete' | 'Follow-up'>('All');
+  const [filterTab, setFilterTab] = useState<'Fresh' | 'Not Connected' | 'Interested' | 'Complete' | 'Follow-up'>('Fresh');
   
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -154,7 +154,7 @@ const EmployeeLeadsPage: React.FC = () => {
         ...newLeadData,
         assigned_to: user?.id,
         added_by: user?.id,
-        status: 'Not Connected'
+        status: 'Fresh'
       });
       if (error) throw error;
       
@@ -283,10 +283,7 @@ Employee: ${profile.name}`;
 
   const filteredLeads = leads.filter(l => {
     const matchesSearch = l.name.toLowerCase().includes(search.toLowerCase()) || l.phone.includes(search);
-    const matchesTab =
-      filterTab === 'All'
-        ? (l.status === 'Not Connected' || l.status === 'Pending Recall' || l.pending_recall === true)
-        : l.status === filterTab;
+    const matchesTab = l.status === filterTab;
     return matchesSearch && matchesTab;
   });
 
@@ -325,12 +322,20 @@ Employee: ${profile.name}`;
         <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row items-center justify-between bg-slate-50/50 gap-4">
           <div className="flex flex-wrap gap-2">
             <Button 
-              variant={filterTab === 'All' ? 'default' : 'outline'} 
+              variant={filterTab === 'Fresh' ? 'default' : 'outline'} 
               size="sm" 
-              onClick={() => { setFilterTab('All'); setCurrentPage(1); }}
-              className={cn("text-xs h-8", filterTab === 'All' ? "bg-slate-800 text-white hover:bg-slate-700" : "text-slate-600 bg-white")}
+              onClick={() => { setFilterTab('Fresh'); setCurrentPage(1); }}
+              className={cn("text-xs h-8", filterTab === 'Fresh' ? "bg-slate-800 text-white hover:bg-slate-700" : "text-slate-600 bg-white")}
             >
-              All ({leads.length})
+              🆕 Fresh ({leads.filter(l => l.status === 'Fresh').length})
+            </Button>
+            <Button 
+              variant={filterTab === 'Not Connected' ? 'default' : 'outline'} 
+              size="sm" 
+              onClick={() => { setFilterTab('Not Connected'); setCurrentPage(1); }}
+              className={cn("text-xs h-8", filterTab === 'Not Connected' ? "bg-red-600 text-white hover:bg-red-700" : "text-slate-600 bg-white")}
+            >
+              ❌ Not Connected ({leads.filter(l => l.status === 'Not Connected').length})
             </Button>
             <Button 
               variant={filterTab === 'Interested' ? 'default' : 'outline'} 
