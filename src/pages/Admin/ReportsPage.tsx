@@ -53,19 +53,14 @@ const ReportsPage: React.FC = () => {
       const { data: allCalls } = await supabase.from('call_attempts').select('id,fake_call,user_id');
       const { data: allWA } = await supabase.from('whatsapp_messages').select('id,user_id');
 
-      const stats = (users||[]).map((u: any) => {
-        const myLeads = (allLeads||[]).filter((l:any)=>l.assigned_to===u.id);
-        return {
-          id: u.id, name: u.name, role: u.role,
-          totalAssigned: myLeads.length,
-          genuineCalls: (allCalls||[]).filter((c:any)=>c.user_id===u.id&&!c.fake_call).length,
-          fakeCalls: (allCalls||[]).filter((c:any)=>c.user_id===u.id&&c.fake_call).length,
-          completions: myLeads.filter((l:any)=>l.status==='Complete').length,
-          interested: myLeads.filter((l:any)=>l.status==='Interested').length,
-          followUps: myLeads.filter((l:any)=>l.status==='Follow-up').length,
-          waShares: (allWA||[]).filter((w:any)=>w.user_id===u.id).length
-        };
-      });
+      const stats = (users||[]).map((u: any) => ({
+        id: u.id, name: u.name, role: u.role,
+        totalAssigned: (allLeads||[]).filter((l:any)=>l.assigned_to===u.id).length,
+        genuineCalls: (allCalls||[]).filter((c:any)=>c.user_id===u.id&&!c.fake_call).length,
+        fakeCalls: (allCalls||[]).filter((c:any)=>c.user_id===u.id&&c.fake_call).length,
+        completions: (allLeads||[]).filter((l:any)=>l.assigned_to===u.id&&l.status==='Complete').length,
+        waShares: (allWA||[]).filter((w:any)=>w.user_id===u.id).length
+      }));
 
       setReports(stats);
     } catch (error: any) {
@@ -138,8 +133,6 @@ const ReportsPage: React.FC = () => {
                   <TableHead>Assigned</TableHead>
                   <TableHead>Genuine</TableHead>
                   <TableHead>Fake</TableHead>
-                  <TableHead>Interested</TableHead>
-                  <TableHead>Follow-up</TableHead>
                   <TableHead>WhatsApp</TableHead>
                   <TableHead>Completions</TableHead>
                   <TableHead className="text-right">Ratio</TableHead>
@@ -147,15 +140,13 @@ const ReportsPage: React.FC = () => {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={9} className="text-center py-10">Loading metrics...</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={7} className="text-center py-10">Loading metrics...</TableCell></TableRow>
                 ) : filteredReports.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell className="font-medium">{row.name}</TableCell>
                     <TableCell>{row.totalAssigned}</TableCell>
                     <TableCell className="text-blue-600 font-semibold">{row.genuineCalls}</TableCell>
                     <TableCell className="text-red-500">{row.fakeCalls}</TableCell>
-                    <TableCell className="text-purple-600 font-semibold">{(row as any).interested || 0}</TableCell>
-                    <TableCell className="text-amber-600 font-semibold">{(row as any).followUps || 0}</TableCell>
                     <TableCell>{row.waShares}</TableCell>
                     <TableCell className="text-emerald-600 font-bold">{row.completions}</TableCell>
                     <TableCell className="text-right font-mono text-xs">
