@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils';
 
 const DashboardLayout: React.FC = () => {
   const [showActivity, setShowActivity] = React.useState(false);
+  const [isMobileOpen, setIsMobileOpen] = React.useState(false); // ✅ FIX: Missing state added
   const { profile, signOut } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -54,7 +55,7 @@ const DashboardLayout: React.FC = () => {
     navigate('/login');
   };
 
-  const SidebarContent = () => (
+  const SidebarContent = ({ onNavClick }: { onNavClick?: () => void } = {}) => (
     <div className="flex flex-col h-full bg-slate-900 text-white">
       <div className="p-6 flex items-center gap-3 border-b border-slate-800">
         <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center font-bold text-lg italic text-white">C+</div>
@@ -71,6 +72,7 @@ const DashboardLayout: React.FC = () => {
             <Link
               key={item.path}
               to={item.path}
+              onClick={onNavClick}
               className={cn(
                 "flex items-center gap-3 p-2 rounded-lg transition-colors",
                 isActive 
@@ -121,12 +123,15 @@ const DashboardLayout: React.FC = () => {
         {/* Header Bar */}
         <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between shadow-sm z-10">
           <div className="flex items-center gap-4">
-            <Sheet>
-              <SheetTrigger render={<Button variant="ghost" size="icon" className="lg:hidden" />}>
-                <Menu className="h-6 w-6 text-slate-600" />
+            {/* ✅ FIX: SheetTrigger fixed - removed invalid render prop */}
+            <Sheet open={isMobileOpen} onOpenChange={setIsMobileOpen}>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon" className="lg:hidden">
+                  <Menu className="h-6 w-6 text-slate-600" />
+                </Button>
               </SheetTrigger>
               <SheetContent side="left" className="p-0 w-64 bg-slate-900 border-none">
-                <SidebarContent />
+                <SidebarContent onNavClick={() => setIsMobileOpen(false)} />
               </SheetContent>
             </Sheet>
             <h1 className="text-lg font-bold text-slate-800 capitalize">
