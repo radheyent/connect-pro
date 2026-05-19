@@ -54,7 +54,7 @@ const DashboardLayout: React.FC = () => {
     navigate('/login');
   };
 
-  const SidebarContent = () => (
+  const SidebarContent = ({ onNavClick }: { onNavClick?: () => void } = {}) => (
     <div className="flex flex-col h-full bg-slate-900 text-white">
       <div className="p-6 flex items-center gap-3 border-b border-slate-800">
         <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center font-bold text-lg italic text-white">C+</div>
@@ -121,12 +121,12 @@ const DashboardLayout: React.FC = () => {
         {/* Header Bar */}
         <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between shadow-sm z-10">
           <div className="flex items-center gap-4">
-            <Sheet>
-              <SheetTrigger render={<Button variant="ghost" size="icon" className="lg:hidden" />}>
+            <Sheet open={isMobileOpen} onOpenChange={setIsMobileOpen}>
+              <SheetTrigger render={<Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setIsMobileOpen(true)} />}>
                 <Menu className="h-6 w-6 text-slate-600" />
               </SheetTrigger>
               <SheetContent side="left" className="p-0 w-64 bg-slate-900 border-none">
-                <SidebarContent />
+                <SidebarContent onNavClick={() => setIsMobileOpen(false)} />
               </SheetContent>
             </Sheet>
             <h1 className="text-lg font-bold text-slate-800 capitalize">
