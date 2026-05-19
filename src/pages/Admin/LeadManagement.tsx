@@ -85,11 +85,13 @@ const LeadManagement: React.FC = () => {
   const handleUpdateLead = async () => {
     if (!editingLead) return;
     try {
+      const assigneeValue = editAssigneeId === '_unassigned' || !editAssigneeId ? null : editAssigneeId;
+      
       const { error } = await supabase
         .from('leads')
         .update({ 
           status: editStatus,
-          assigned_to: editAssigneeId === '_unassigned' || !editAssigneeId ? null : editAssigneeId
+          assigned_to: assigneeValue
         })
         .eq('id', editingLead.id);
 
@@ -100,6 +102,44 @@ const LeadManagement: React.FC = () => {
       fetchData();
     } catch (error: any) {
       toast.error(error.message);
+    }
+  };
+
+  // FIXED: Added missing handleBulkDeleteByStatus function
+  const handleBulkDeleteByStatus = async () => {
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .delete()
+        .eq('status', bulkDeleteStatus);
+
+      if (error) throw error;
+      
+      const deletedCount = leads.filter(l => l.status === bulkDeleteStatus).length;
+      toast.success(`Deleted ${deletedCount} leads with status "${bulkDeleteStatus}"`);
+      setIsBulkStatusDeleteOpen(false);
+      setBulkDeleteStatus('');
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete leads');
+    }
+  };
+
+  // FIXED: Added missing handleDeleteSingle function
+  const handleDeleteSingle = async (leadId: string) => {
+    if (!confirm('Are you sure you want to delete this lead?')) return;
+    
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .delete()
+        .eq('id', leadId);
+
+      if (error) throw error;
+      toast.success('Lead deleted successfully');
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete lead');
     }
   };
 
@@ -137,6 +177,13 @@ const LeadManagement: React.FC = () => {
       if (error) throw error;
       toast.success('Lead added successfully');
       setIsAddModalOpen(false);
+      setNewLead({
+        name: '',
+        phone: '',
+        matching_number: '',
+        current_operator: '',
+        important: false
+      });
       fetchData();
     } catch (error: any) {
       toast.error(error.message);
@@ -176,6 +223,7 @@ const LeadManagement: React.FC = () => {
 
       toast.success(`Successfully uploaded ${result.count} leads`);
       setIsUploadModalOpen(false);
+      setUploadFile(null);
       fetchData();
     } catch (error: any) {
       toast.error(error.message);
@@ -211,7 +259,10 @@ const LeadManagement: React.FC = () => {
     const matchesTab = filterTab === 'All' ? true : 
                        filterTab === 'Not Connected' ? (l.status === 'Not Connected' || !l.status) : 
                        l.status === filterTab;
-    return matchesSearch && matchesTab;
+    const matchesEmployee = employeeFilter === 'all' ? true :
+                           employeeFilter === 'unassigned' ? !l.assigned_to :
+                           l.assigned_to === employeeFilter;
+    return matchesSearch && matchesTab && matchesEmployee;
   });
 
   return (
@@ -562,6 +613,7 @@ const LeadManagement: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
       {/* Edit Modal */}
       <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
         <DialogContent>
@@ -601,12 +653,7 @@ const LeadManagement: React.FC = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditModalOpen(false)}>Cancel</Button>
-            <Button onClick={() => {
-              if (editAssigneeId === '_unassigned') {
-                setEditAssigneeId('');
-              }
-              handleUpdateLead();
-            }}>Update Lead</Button>
+            <Button onClick={handleUpdateLead}>Update Lead</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
