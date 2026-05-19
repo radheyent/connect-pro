@@ -53,10 +53,9 @@ const LeadManagement: React.FC = () => {
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [employeeFilter, setEmployeeFilter] = useState<string>('all');
-  const [isBulkStatusDeleteOpen, setIsBulkStatusDeleteOpen] = useState(false);
-  const [bulkDeleteStatus, setBulkDeleteStatus] = useState('');
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+  const [bulkDeleteStatus, setBulkDeleteStatus] = useState<'Not Connected' | 'No Interested' | null>(null);
 
   // Form states
   const [newLead, setNewLead] = useState({
@@ -68,6 +67,7 @@ const LeadManagement: React.FC = () => {
   });
   const [assigneeId, setAssigneeId] = useState('');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   // Edit Modal
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -85,13 +85,11 @@ const LeadManagement: React.FC = () => {
   const handleUpdateLead = async () => {
     if (!editingLead) return;
     try {
-      const assigneeValue = editAssigneeId === '_unassigned' || !editAssigneeId ? null : editAssigneeId;
-      
       const { error } = await supabase
         .from('leads')
         .update({ 
           status: editStatus,
-          assigned_to: assigneeValue
+          assigned_to: editAssigneeId === '_unassigned' || !editAssigneeId ? null : editAssigneeId
         })
         .eq('id', editingLead.id);
 
@@ -105,44 +103,6 @@ const LeadManagement: React.FC = () => {
     }
   };
 
-  // FIXED: Added missing handleBulkDeleteByStatus function
-  const handleBulkDeleteByStatus = async () => {
-    try {
-      const { error } = await supabase
-        .from('leads')
-        .delete()
-        .eq('status', bulkDeleteStatus);
-
-      if (error) throw error;
-      
-      const deletedCount = leads.filter(l => l.status === bulkDeleteStatus).length;
-      toast.success(`Deleted ${deletedCount} leads with status "${bulkDeleteStatus}"`);
-      setIsBulkStatusDeleteOpen(false);
-      setBulkDeleteStatus('');
-      fetchData();
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to delete leads');
-    }
-  };
-
-  // FIXED: Added missing handleDeleteSingle function
-  const handleDeleteSingle = async (leadId: string) => {
-    if (!confirm('Are you sure you want to delete this lead?')) return;
-    
-    try {
-      const { error } = await supabase
-        .from('leads')
-        .delete()
-        .eq('id', leadId);
-
-      if (error) throw error;
-      toast.success('Lead deleted successfully');
-      fetchData();
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to delete lead');
-    }
-  };
-
   useEffect(() => {
     fetchData();
   }, []);
@@ -152,7 +112,7 @@ const LeadManagement: React.FC = () => {
     try {
       const { data: leadsData, error: leadsError } = await supabase
         .from('leads')
-        .select('*, assigned_user:user_profiles!assigned_to(*)')
+        .select('id,name,phone,matching_number,current_operator,status,assigned_to,important,created_date,notes,pending_recall,follow_up_date,follow_up_time,last_call_date,last_call_duration')
         .order('created_date', { ascending: false });
 
       const { data: empData, error: empError } = await supabase
@@ -162,7 +122,13 @@ const LeadManagement: React.FC = () => {
 
       if (leadsError || empError) throw leadsError || empError;
       
-      setLeads(leadsData || []);
+      const empMap: Record<string,string> = {};
+      (empData||[]).forEach((e:any)=>{ empMap[e.id]=e.name; });
+      const enriched = (leadsData||[]).map((l:any)=>({
+        ...l,
+        assigned_user: l.assigned_to ? { name: empMap[l.assigned_to]||'Unknown' } : null
+      }));
+      setLeads(enriched);
       setEmployees(empData || []);
     } catch (error: any) {
       toast.error('Failed to fetch data');
@@ -177,13 +143,24 @@ const LeadManagement: React.FC = () => {
       if (error) throw error;
       toast.success('Lead added successfully');
       setIsAddModalOpen(false);
-      setNewLead({
-        name: '',
-        phone: '',
-        matching_number: '',
-        current_operator: '',
-        important: false
-      });
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message);
+    }
+  };
+
+  const handleBulkDeleteByStatus = async () => {
+    if (!bulkDeleteStatus) return;
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .delete()
+        .eq('status', bulkDeleteStatus);
+      if (error) throw error;
+      const count = leads.filter(l => l.status === bulkDeleteStatus).length;
+      toast.success(`${count} "${bulkDeleteStatus}" leads deleted`);
+      setIsBulkDeleteModalOpen(false);
+      setBulkDeleteStatus(null);
       fetchData();
     } catch (error: any) {
       toast.error(error.message);
@@ -208,25 +185,51 @@ const LeadManagement: React.FC = () => {
     }
   };
 
+  // ✅ FIX: Bulk upload now uses Supabase directly — no backend server needed
   const handleFileUpload = async () => {
     if (!uploadFile) return;
-    const formData = new FormData();
-    formData.append('file', uploadFile);
+    setIsUploading(true);
 
     try {
-      const res = await fetch('/api/admin/leads/bulk-upload', {
-        method: 'POST',
-        body: formData,
-      });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error);
+      const text = await uploadFile.text();
+      const lines = text.split('\n').filter(l => l.trim());
+      const headers = lines[0].split(',').map(h => h.trim());
+      
+      const mappedLeads = lines.slice(1).map(line => {
+        const values = line.split(',').map(v => v.trim());
+        const row: any = {};
+        headers.forEach((h, i) => { row[h] = values[i] || ''; });
+        
+        return {
+          name: row['Name'] || '',
+          phone: String(row['Phone'] || ''),
+          matching_number: row['MatchingNumber'] || null,
+          current_operator: row['CurrentOperator'] || null,
+          status: row['Status'] || 'Not Connected',
+          notes: row['Notes'] || null,
+          important: String(row['Important']).toLowerCase() === 'true',
+          created_date: row['CreatedDate'] || new Date().toISOString(),
+          last_call_duration: parseInt(row['CallDuration']) || 0,
+          pending_recall: false,
+        };
+      }).filter(l => l.name && l.phone);
 
-      toast.success(`Successfully uploaded ${result.count} leads`);
+      if (mappedLeads.length === 0) {
+        toast.error('No valid leads found in file');
+        return;
+      }
+
+      const { error } = await supabase.from('leads').insert(mappedLeads);
+      if (error) throw error;
+
+      toast.success(`Successfully uploaded ${mappedLeads.length} leads`);
       setIsUploadModalOpen(false);
       setUploadFile(null);
       fetchData();
     } catch (error: any) {
-      toast.error(error.message);
+      toast.error('Upload failed: ' + error.message);
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -245,7 +248,7 @@ const LeadManagement: React.FC = () => {
   };
 
   const downloadTemplate = () => {
-    const headers = "Name,Phone,MatchingNumber,CurrentOperator,Status,AssignedTo,AddedBy,LastCallDate,Notes,Important,CreatedDate,CompletedDate,CallDuration\n";
+    const headers = "Name,Phone,MatchingNumber,CurrentOperator,Status,Notes,Important,CreatedDate,CallDuration\n";
     const blob = new Blob([headers], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -259,10 +262,7 @@ const LeadManagement: React.FC = () => {
     const matchesTab = filterTab === 'All' ? true : 
                        filterTab === 'Not Connected' ? (l.status === 'Not Connected' || !l.status) : 
                        l.status === filterTab;
-    const matchesEmployee = employeeFilter === 'all' ? true :
-                           employeeFilter === 'unassigned' ? !l.assigned_to :
-                           l.assigned_to === employeeFilter;
-    return matchesSearch && matchesTab && matchesEmployee;
+    return matchesSearch && matchesTab;
   });
 
   return (
@@ -281,8 +281,8 @@ const LeadManagement: React.FC = () => {
             </Button>
           )}
         </div>
-        <div className="flex gap-2 w-full lg:w-auto flex-wrap">
-          <div className="relative flex-1 lg:w-64">
+        <div className="flex gap-2 w-full lg:w-auto">
+          <div className="relative flex-1 lg:w-80">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input 
               placeholder="Search leads..." 
@@ -291,82 +291,24 @@ const LeadManagement: React.FC = () => {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
-            <SelectTrigger className="w-44 h-10 text-sm">
-              <SelectValue placeholder="All Employees" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">👥 All Employees</SelectItem>
-              <SelectItem value="unassigned">— Unassigned</SelectItem>
-              {employees.map((emp: any) => (
-                <SelectItem key={emp.id} value={emp.id}>{emp.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
       </div>
 
       {/* Filter Tabs */}
       <div className="flex flex-wrap gap-2 mb-4">
-        <Button 
-          variant={filterTab === 'All' ? 'default' : 'outline'} 
-          size="sm" 
-          onClick={() => setFilterTab('All')}
-          className={cn("text-xs h-8", filterTab === 'All' ? "bg-slate-800 text-white" : "text-slate-600 bg-white")}
-        >
-          All ({leads.length})
-        </Button>
-        <Button 
-          variant={filterTab === 'Not Connected' ? 'default' : 'outline'} 
-          size="sm" 
-          onClick={() => setFilterTab('Not Connected')}
-          className={cn("text-xs h-8", filterTab === 'Not Connected' ? "bg-slate-600 text-white" : "text-slate-600 bg-white")}
-        >
-          Not Connected ({leads.filter(l => l.status === 'Not Connected' || !l.status).length})
-        </Button>
-        <Button 
-          variant={filterTab === 'Interested' ? 'default' : 'outline'} 
-          size="sm" 
-          onClick={() => setFilterTab('Interested')}
-          className={cn("text-xs h-8", filterTab === 'Interested' ? "bg-green-600 text-white" : "text-slate-600 bg-white")}
-        >
-          Interested ({leads.filter(l => l.status === 'Interested').length})
-        </Button>
-        <Button 
-          variant={filterTab === 'Follow-up' ? 'default' : 'outline'} 
-          size="sm" 
-          onClick={() => setFilterTab('Follow-up')}
-          className={cn("text-xs h-8", filterTab === 'Follow-up' ? "bg-amber-500 text-white" : "text-slate-600 bg-white")}
-        >
-          Follow-ups ({leads.filter(l => l.status === 'Follow-up').length})
-        </Button>
-        <Button 
-          variant={filterTab === 'Complete' ? 'default' : 'outline'} 
-          size="sm" 
-          onClick={() => setFilterTab('Complete')}
-          className={cn("text-xs h-8", filterTab === 'Complete' ? "bg-blue-600 text-white" : "text-slate-600 bg-white")}
-        >
-          Completed ({leads.filter(l => l.status === 'Complete').length})
-        </Button>
-        <Button 
-          variant={filterTab === 'Not Interested' ? 'default' : 'outline'} 
-          size="sm" 
-          onClick={() => setFilterTab('Not Interested')}
-          className={cn("text-xs h-8", filterTab === 'Not Interested' ? "bg-orange-600 text-white" : "text-slate-600 bg-white")}
-        >
-          Not Interested ({leads.filter(l => l.status === 'Not Interested').length})
-        </Button>
-        {filterTab !== 'All' && leads.filter(l => l.status === filterTab).length > 0 && (
+        {(['All', 'Not Connected', 'Interested', 'Follow-up', 'Complete'] as const).map(tab => (
           <Button
+            key={tab}
+            variant={filterTab === tab ? 'default' : 'outline'}
             size="sm"
-            variant="outline"
-            className="text-xs h-8 border-red-200 text-red-600 hover:bg-red-50 ml-auto"
-            onClick={() => { setBulkDeleteStatus(filterTab); setIsBulkStatusDeleteOpen(true); }}
+            onClick={() => setFilterTab(tab)}
+            className={cn("text-xs h-8",
+              filterTab === tab ? "bg-slate-800 text-white" : "text-slate-600 bg-white"
+            )}
           >
-            <Trash2 className="h-3.5 w-3.5 mr-1" />
-            Delete All {filterTab} ({leads.filter(l => l.status === filterTab).length})
+            {tab} ({tab === 'All' ? leads.length : tab === 'Not Connected' ? leads.filter(l => l.status === 'Not Connected' || !l.status).length : leads.filter(l => l.status === tab).length})
           </Button>
-        )}
+        ))}
       </div>
 
       <div className="border rounded-xl bg-white shadow-sm overflow-hidden border-slate-200">
@@ -395,7 +337,7 @@ const LeadManagement: React.FC = () => {
               ) : filteredLeads.length === 0 ? (
                 <TableRow><TableCell colSpan={7} className="text-center py-20 text-slate-400">No leads found.</TableCell></TableRow>
               ) : (
-                  filteredLeads.map((lead) => (
+                filteredLeads.map((lead) => (
                   <TableRow key={lead.id} className="hover:bg-slate-50 transition-colors">
                     <TableCell className="p-4">
                       <Checkbox 
@@ -406,20 +348,20 @@ const LeadManagement: React.FC = () => {
                     </TableCell>
                     <TableCell className="p-4 font-medium text-slate-900">
                       <div className="flex items-center gap-2">
-                          {lead.name}
-                          {lead.important && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>}
+                        {lead.name}
+                        {lead.important && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>}
                       </div>
                     </TableCell>
                     <TableCell className="p-4 text-slate-600 font-mono text-xs">{lead.phone}</TableCell>
                     <TableCell className="p-4">
                       <span className={cn(
-                          "px-2 py-1 text-[11px] font-bold rounded-full uppercase",
-                          lead.status === 'Interested' ? "bg-green-100 text-green-700" :
-                          lead.status === 'Follow-up' ? "bg-blue-100 text-blue-700" :
-                          lead.status === 'Complete' ? "bg-blue-600 text-white" :
-                          "bg-slate-100 text-slate-600"
+                        "px-2 py-1 text-[11px] font-bold rounded-full uppercase",
+                        lead.status === 'Interested' ? "bg-green-100 text-green-700" :
+                        lead.status === 'Follow-up' ? "bg-blue-100 text-blue-700" :
+                        lead.status === 'Complete' ? "bg-blue-600 text-white" :
+                        "bg-slate-100 text-slate-600"
                       )}>
-                          {lead.status}
+                        {lead.status}
                       </span>
                     </TableCell>
                     <TableCell className="p-4 text-slate-600 italic">
@@ -430,12 +372,12 @@ const LeadManagement: React.FC = () => {
                     </TableCell>
                     <TableCell className="p-4 text-right">
                       <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-slate-100" onClick={() => handleOpenEdit(lead)}>
-                              <Edit className="h-4 w-4 text-slate-500" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:bg-red-50" onClick={() => handleDeleteSingle(lead.id)}>
-                              <Trash2 className="h-4 w-4" />
-                          </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-slate-100" onClick={() => handleOpenEdit(lead)}>
+                          <Edit className="h-4 w-4 text-slate-500" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:bg-red-50">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -448,9 +390,9 @@ const LeadManagement: React.FC = () => {
         {/* Mobile View */}
         <div className="md:hidden divide-y divide-slate-100">
           {loading ? (
-             <div className="p-8 text-center text-slate-400">Loading...</div>
+            <div className="p-8 text-center text-slate-400">Loading...</div>
           ) : filteredLeads.length === 0 ? (
-             <div className="p-8 text-center text-slate-400">No leads found.</div>
+            <div className="p-8 text-center text-slate-400">No leads found.</div>
           ) : (
             filteredLeads.map(lead => (
               <div key={lead.id} className="p-4 flex items-start gap-3">
@@ -468,13 +410,13 @@ const LeadManagement: React.FC = () => {
                       {lead.important && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>}
                     </div>
                     <span className={cn(
-                        "px-2 py-0.5 text-[9px] font-bold rounded-full uppercase",
-                        lead.status === 'Interested' ? "bg-green-100 text-green-700" :
-                        lead.status === 'Follow-up' ? "bg-blue-100 text-blue-700" :
-                        lead.status === 'Complete' ? "bg-blue-600 text-white" :
-                        "bg-slate-100 text-slate-600"
+                      "px-2 py-0.5 text-[9px] font-bold rounded-full uppercase",
+                      lead.status === 'Interested' ? "bg-green-100 text-green-700" :
+                      lead.status === 'Follow-up' ? "bg-blue-100 text-blue-700" :
+                      lead.status === 'Complete' ? "bg-blue-600 text-white" :
+                      "bg-slate-100 text-slate-600"
                     )}>
-                        {lead.status}
+                      {lead.status}
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 font-mono">{lead.phone}</p>
@@ -493,25 +435,22 @@ const LeadManagement: React.FC = () => {
         </div>
       </div>
 
-      {/* Bulk Delete by Status Modal */}
-      <Dialog open={isBulkStatusDeleteOpen} onOpenChange={setIsBulkStatusDeleteOpen}>
+      {/* Bulk Delete Modal */}
+      <Dialog open={isBulkDeleteModalOpen} onOpenChange={setIsBulkDeleteModalOpen}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
-            <DialogTitle className="text-red-600 flex items-center gap-2">
-              <Trash2 className="h-5 w-5" /> Delete All "{bulkDeleteStatus}" Leads
-            </DialogTitle>
+            <DialogTitle className="text-red-600">⚠️ Delete All {bulkDeleteStatus} Leads</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-slate-600 py-2">
-            This will permanently delete{' '}
-            <strong className="text-red-600">
-              {leads.filter(l => l.status === bulkDeleteStatus).length} leads
-            </strong>{' '}
-            with status <strong>"{bulkDeleteStatus}"</strong>. This cannot be undone.
-          </p>
+          <div className="py-4">
+            <p className="text-slate-600 text-sm">
+              This will permanently delete <strong className="text-red-600">{leads.filter(l => l.status === bulkDeleteStatus).length} leads</strong> with status <strong>"{bulkDeleteStatus}"</strong>.
+            </p>
+            <p className="text-slate-500 text-xs mt-2">This action cannot be undone.</p>
+          </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setIsBulkStatusDeleteOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setIsBulkDeleteModalOpen(false)}>Cancel</Button>
             <Button variant="destructive" onClick={handleBulkDeleteByStatus}>
-              Yes, Delete All
+              Delete All {bulkDeleteStatus}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -560,20 +499,20 @@ const LeadManagement: React.FC = () => {
       <Dialog open={isUploadModalOpen} onOpenChange={setIsUploadModalOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Bulk Upload Leads</DialogTitle>
+            <DialogTitle>Bulk Upload Leads (CSV)</DialogTitle>
           </DialogHeader>
           <div className="py-6 space-y-4">
             <div className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-10 cursor-pointer hover:bg-muted/50 transition-colors"
                  onClick={() => document.getElementById('file-upload')?.click()}>
               <Upload className="h-10 w-10 text-muted-foreground mb-4" />
               <p className="text-sm text-center">
-                {uploadFile ? uploadFile.name : 'Click to upload CSV or Excel file'}
+                {uploadFile ? uploadFile.name : 'Click to upload CSV file'}
               </p>
               <input 
                 id="file-upload" 
                 type="file" 
                 className="hidden" 
-                accept=".csv,.xlsx,.xls"
+                accept=".csv"
                 onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
               />
             </div>
@@ -583,7 +522,9 @@ const LeadManagement: React.FC = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsUploadModalOpen(false)}>Cancel</Button>
-            <Button onClick={handleFileUpload} disabled={!uploadFile}>Upload Leads</Button>
+            <Button onClick={handleFileUpload} disabled={!uploadFile || isUploading}>
+              {isUploading ? 'Uploading...' : 'Upload Leads'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -653,7 +594,10 @@ const LeadManagement: React.FC = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditModalOpen(false)}>Cancel</Button>
-            <Button onClick={handleUpdateLead}>Update Lead</Button>
+            <Button onClick={() => {
+              if (editAssigneeId === '_unassigned') setEditAssigneeId('');
+              handleUpdateLead();
+            }}>Update Lead</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
