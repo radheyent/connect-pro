@@ -1,10 +1,10 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { X, Star, Zap, Trophy, Megaphone } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface ActivityItem {
@@ -111,107 +111,118 @@ export const RecentActivityPanel: React.FC = () => {
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchActivity = useCallback(async () => {
     if (!user || !profile) return;
+    try {
+      const activityItems: ActivityItem[] = [];
 
-    const load = async () => {
-      try {
-        const activityItems: ActivityItem[] = [];
+      // TYPE 1: Sales closed by any employee (Last 5)
+      const { data: sales } = await supabase
+        .from('leads')
+        .select('id, name, assigned_to, completed_date, last_call_date')
+        .eq('status', 'Complete')
+        .order('last_call_date', { ascending: false })
+        .limit(5);
 
-        // TYPE 1: Last 4 completed sales
-        const { data: sales } = await supabase
-          .from('leads')
-          .select('id, name, assigned_to, completed_date, last_call_date')
-          .eq('status', 'Complete')
-          .order('last_call_date', { ascending: false })
-          .limit(4);
-
-        if (sales && sales.length > 0) {
-          const ids = [...new Set(sales.map((s: any) => s.assigned_to).filter(Boolean))];
-          const empMap: Record<string, string> = {};
-          if (ids.length) {
-            const { data: emps } = await supabase.from('user_profiles').select('id,name').in('id', ids);
-            (emps || []).forEach((e: any) => { empMap[e.id] = e.name; });
-          }
-          sales.forEach((s: any) => {
-            const empName = empMap[s.assigned_to] || 'Someone';
-            const isMine = s.assigned_to === user.id;
-            activityItems.push({
-              id: `s-${s.id}`, type: 'sale',
-              title: isMine
-                ? `🏆 You closed a sale! Well Done ${profile.name}!`
-                : `🏆 ${empName} closed a sale! Well Done ${empName}!`,
-              subtitle: `Customer: ${s.name}`,
-              time: s.completed_date || s.last_call_date || s.id,
-            });
-          });
-        }
-
-        // TYPE 2: Last 4 announcements
-        const { data: anns } = await supabase
-          .from('announcements').select('id, title, created_at')
-          .order('created_at', { ascending: false }).limit(4);
-        (anns || []).forEach((a: any) => {
-          activityItems.push({
-            id: `a-${a.id}`, type: 'announcement',
-            title: `📢 Admin made an announcement`,
-            subtitle: a.title,
-            time: a.created_at,
-          });
-        });
-
-        // TYPE 3: Your most recent call (always 1, always shown)
-        const { data: myCall } = await supabase
-          .from('call_attempts').select('id, lead_id, created_at, duration_seconds')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false }).limit(1);
-        if (myCall && myCall.length > 0) {
-          const c = myCall[0];
-          const { data: lead } = await supabase.from('leads').select('name, phone').eq('id', c.lead_id).single();
-          if (lead) {
-            activityItems.push({
-              id: `c-${c.id}`, type: 'call',
-              title: `📞 You last called ${lead.name}`,
-              subtitle: `${lead.phone} • ${c.duration_seconds || 0}s`,
-              time: c.created_at,
-            });
-          }
-        }
-
-        // Sort by time, keep 5 (last call always in because it has its own slot)
-        const sorted = activityItems
-          .filter(i => i.time)
-          .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
-          .slice(0, 5);
-
-        setItems(sorted);
-      } catch (e) {
-        console.error('Activity:', e);
-      } finally {
-        setLoading(false);
+      const assignedIds = [...new Set((sales || []).map((s: any) => s.assigned_to).filter(Boolean))];
+      const empMap: Record<string, string> = {};
+      if (assignedIds.length) {
+        const { data: emps } = await supabase.from('user_profiles').select('id,name').in('id', assignedIds);
+        (emps || []).forEach((e: any) => { empMap[e.id] = e.name; });
       }
-    };
 
-    load();
+      (sales || []).forEach((s: any) => {
+        const empName = empMap[s.assigned_to] || 'Employee';
+        const isMine = s.assigned_to === user.id;
+        activityItems.push({
+          id: `s-${s.id}`,
+          type: 'sale',
+          title: isMine
+            ? `🏆 You closed a sale! Well done ${profile.name}!`
+            : `🏆 ${empName} closed a sale! Well done ${empName}!`,
+          subtitle: `Customer: ${s.name}`,
+          time: s.completed_date || s.last_call_date || '',
+        });
+      });
 
-    // Realtime + polling
-    const uid = user.id;
-    const ch1 = supabase.channel(`ra-${uid}-leads`)
+      // TYPE 2: Announcements (Last 5)
+      const { data: anns } = await supabase
+        .from('announcements')
+        .select('id, title, created_at')
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      (anns || []).forEach((a: any) => {
+        activityItems.push({
+          id: `a-${a.id}`,
+          type: 'announcement',
+          title: `📢 Admin made an announcement`,
+          subtitle: a.title,
+          time: a.created_at,
+        });
+      });
+
+      // TYPE 3: Your last call (most recent call_attempt by this user)
+      const { data: myLastCall } = await supabase
+        .from('call_attempts')
+        .select('id, lead_id, created_at, duration_seconds')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (myLastCall && myLastCall.length > 0) {
+        const call = myLastCall[0];
+        const { data: lead } = await supabase
+          .from('leads')
+          .select('name, phone')
+          .eq('id', call.lead_id)
+          .single();
+
+        if (lead) {
+          activityItems.push({
+            id: `c-${call.id}`,
+            type: 'call',
+            title: `📞 You made last call to ${lead.name}`,
+            subtitle: `${lead.phone} • ${call.duration_seconds || 0}s`,
+            time: call.created_at,
+          });
+        }
+      }
+
+      // Sort all by time, take 5
+      const sorted = activityItems
+        .filter(i => i.time)
+        .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+        .slice(0, 5);
+
+      setItems(sorted);
+    } catch (e) {
+      console.error('Activity fetch:', e);
+    } finally {
+      setLoading(false);
+    }
+  }, [user, profile]);
+
+  useEffect(() => {
+    fetchActivity();
+    const ch1 = supabase.channel('ra-leads')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leads' },
-        (p) => { if (p.new?.status === 'Complete') load(); }).subscribe();
-    const ch2 = supabase.channel(`ra-${uid}-ann`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'announcements' }, load).subscribe();
-    const ch3 = supabase.channel(`ra-${uid}-calls`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_attempts' }, load).subscribe();
-    const poll = setInterval(load, 20000);
-
+        (p) => { if (p.new?.status === 'Complete') fetchActivity(); })
+      .subscribe();
+    const ch2 = supabase.channel('ra-ann')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'announcements' }, fetchActivity)
+      .subscribe();
+    const ch3 = supabase.channel('ra-calls')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_attempts' }, fetchActivity)
+      .subscribe();
+    const poll = setInterval(fetchActivity, 30000);
     return () => {
       supabase.removeChannel(ch1);
       supabase.removeChannel(ch2);
       supabase.removeChannel(ch3);
       clearInterval(poll);
     };
-  }, [user?.id, profile?.id]);
+  }, [fetchActivity]);
 
   if (loading) return (
     <div className="space-y-2 p-1">
