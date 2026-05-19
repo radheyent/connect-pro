@@ -109,10 +109,14 @@ const CelebrationOverlay: React.FC<{ data: CelebrationData; onClose: () => void 
 export const RecentActivityPanel: React.FC = () => {
   const { user, profile } = useAuth();
   const [items, setItems] = useState<ActivityItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!user || !profile) return;
+    if (!user || !profile) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
 
     const load = async () => {
       try {
@@ -178,10 +182,13 @@ export const RecentActivityPanel: React.FC = () => {
           }
         }
 
-        // Sort by time, keep 5 (last call always in because it has its own slot)
+        // Sort by time desc, keep 5
         const sorted = activityItems
-          .filter(i => i.time)
-          .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+          .sort((a, b) => {
+            const ta = a.time ? new Date(a.time).getTime() : 0;
+            const tb = b.time ? new Date(b.time).getTime() : 0;
+            return tb - ta;
+          })
           .slice(0, 5);
 
         setItems(sorted);
