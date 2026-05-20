@@ -170,7 +170,7 @@ const EmployeeLeadsPage: React.FC = () => {
   const startCall = (lead: Lead) => {
     setActiveLead(lead);
     setCallStartTime(Date.now());
-    setEditStatus(lead.status);
+    setEditStatus(lead.status || 'Fresh');
     setEditNotes(lead.notes || '');
     setEditFollowUpDate(lead.follow_up_date || '');
     setEditFollowUpTime(lead.follow_up_time || '');
@@ -408,6 +408,10 @@ Employee: ${profile.name}`;
                           className="flex items-center gap-2 cursor-pointer hover:text-blue-600 transition-colors"
                           onClick={() => {
                             setActiveLead(lead);
+                            setEditStatus(lead.status || 'Fresh');
+                            setEditNotes(lead.notes || '');
+                            setEditFollowUpDate(lead.follow_up_date || '');
+                            setEditFollowUpTime(lead.follow_up_time || '');
                             setIsDetailsModalOpen(true);
                           }}
                         >
@@ -468,7 +472,7 @@ Employee: ${profile.name}`;
                           className="bg-white border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 shadow-sm"
                           onClick={() => {
                               setActiveLead(lead);
-                              setEditStatus(lead.status);
+                              setEditStatus(lead.status || 'Fresh');
                               setEditNotes(lead.notes || '');
                               setEditFollowUpDate(lead.follow_up_date || '');
                               setEditFollowUpTime(lead.follow_up_time || '');
@@ -570,7 +574,7 @@ Employee: ${profile.name}`;
                       className="w-full bg-slate-50 border-slate-200 text-slate-600 font-bold text-[11px] h-9"
                       onClick={() => {
                         setActiveLead(lead);
-                        setEditStatus(lead.status);
+                        setEditStatus(lead.status || 'Fresh');
                         setEditNotes(lead.notes || '');
                         setEditFollowUpDate(lead.follow_up_date || '');
                         setEditFollowUpTime(lead.follow_up_time || '');
@@ -649,13 +653,12 @@ Employee: ${profile.name}`;
                    <SelectValue placeholder="Select Status" />
                  </SelectTrigger>
                  <SelectContent>
+                   <SelectItem value="Fresh">Fresh</SelectItem>
                    <SelectItem value="Not Connected">Not Connected</SelectItem>
                    <SelectItem value="Not Interested">Not Interested</SelectItem>
                    <SelectItem value="Interested">Interested</SelectItem>
                    <SelectItem value="Follow-up">Follow-up</SelectItem>
-                   {(profile?.role === 'admin' || profile?.role === 'field_boy') && (
                      <SelectItem value="Complete">Complete</SelectItem>
-                   )}
                  </SelectContent>
                </Select>
             </div>
@@ -719,13 +722,12 @@ Employee: ${profile.name}`;
                    <SelectValue placeholder="Select Status" />
                  </SelectTrigger>
                  <SelectContent>
+                   <SelectItem value="Fresh">Fresh</SelectItem>
                    <SelectItem value="Not Connected">Not Connected</SelectItem>
                    <SelectItem value="Not Interested">Not Interested</SelectItem>
                    <SelectItem value="Interested">Interested</SelectItem>
                    <SelectItem value="Follow-up">Follow-up</SelectItem>
-                   {(profile?.role === 'admin' || profile?.role === 'field_boy') && (
                      <SelectItem value="Complete">Complete</SelectItem>
-                   )}
                  </SelectContent>
                </Select>
              </div>
