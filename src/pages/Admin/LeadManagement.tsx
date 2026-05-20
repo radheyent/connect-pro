@@ -47,7 +47,7 @@ const LeadManagement: React.FC = () => {
   const [employees, setEmployees] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterTab, setFilterTab] = useState<'All' | 'Not Connected' | 'Interested' | 'Not Interested' | 'Follow-up' | 'Complete'>('All');
+  const [filterTab, setFilterTab] = useState<string>('All');
   const [employeeFilter, setEmployeeFilter] = useState<string>('all');
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
   
@@ -150,6 +150,24 @@ const LeadManagement: React.FC = () => {
     }
   };
 
+  const handleBulkDeleteByStatus = async () => {
+    if (!bulkDeleteStatus) return;
+    try {
+      // Only delete leads visible in current filter (employee filter applied)
+      const idsToDelete = filteredLeads.filter(l => l.status === bulkDeleteStatus).map(l => l.id);
+      if (idsToDelete.length === 0) { toast.error('No leads to delete'); return; }
+      const { error } = await supabase.from('leads').delete().in('id', idsToDelete);
+      if (error) throw error;
+      toast.success(`${idsToDelete.length} "${bulkDeleteStatus}" leads deleted`);
+      setIsBulkDeleteModalOpen(false);
+      setBulkDeleteStatus(null as any);
+      setSelectedLeads([]);
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message);
+    }
+  };
+
   const handleDeleteSingle = async (leadId: string) => {
     if (!window.confirm('Delete this lead? This cannot be undone.')) return;
     try {
@@ -163,7 +181,7 @@ const LeadManagement: React.FC = () => {
 
   const handleBulkDeleteSelected = async () => {
     if (selectedLeads.length === 0) return;
-    if (!window.confirm(`Delete ${selectedLeads.length} selected leads? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete ${selectedLeads.length} selected leads? Cannot be undone.`)) return;
     try {
       const { error } = await supabase.from('leads').delete().in('id', selectedLeads);
       if (error) throw error;
@@ -173,30 +191,12 @@ const LeadManagement: React.FC = () => {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const handleBulkDeleteByStatus = async () => {
-    if (!bulkDeleteStatus || bulkDeleteStatus === '') return;
-    try {
-      const { error } = await supabase
-        .from('leads')
-        .delete()
-        .eq('status', bulkDeleteStatus);
-      if (error) throw error;
-      const count = leads.filter(l => l.status === bulkDeleteStatus).length;
-      toast.success(`${count} "${bulkDeleteStatus}" leads deleted`);
-      setIsBulkDeleteModalOpen(false);
-      setBulkDeleteStatus(null);
-      fetchData();
-    } catch (error: any) {
-      toast.error(error.message);
-    }
-  };
-
   const handleBulkAssign = async () => {
     if (!assigneeId || selectedLeads.length === 0) return;
     try {
       const { error } = await supabase
         .from('leads')
-        .update({ assigned_to: assigneeId, status: 'Not Connected' })
+        .update({ assigned_to: assigneeId })
         .in('id', selectedLeads);
 
       if (error) throw error;
@@ -219,22 +219,30 @@ const LeadManagement: React.FC = () => {
       const lines = text.split('\n').filter(l => l.trim());
       const headers = lines[0].split(',').map(h => h.trim());
       
+      // Build employee name → id lookup
+      const empNameMap: Record<string, string> = {};
+      employees.forEach((e: any) => {
+        if (e.name) empNameMap[e.name.trim().toLowerCase()] = e.id;
+      });
+
       const mappedLeads = lines.slice(1).map(line => {
         const values = line.split(',').map(v => v.trim());
         const row: any = {};
         headers.forEach((h, i) => { row[h] = values[i] || ''; });
-        
+        const assignedRaw = (row['AssignedTo'] || row['Assigned To'] || row['assigned_to'] || '').trim().toLowerCase();
+        const assignedId = assignedRaw ? (empNameMap[assignedRaw] || null) : null;
         return {
           name: row['Name'] || '',
           phone: String(row['Phone'] || ''),
           matching_number: row['MatchingNumber'] || null,
           current_operator: row['CurrentOperator'] || null,
-          status: row['Status'] || 'Not Connected',
+          status: row['Status'] || 'Fresh',
           notes: row['Notes'] || null,
           important: String(row['Important']).toLowerCase() === 'true',
           created_date: row['CreatedDate'] || new Date().toISOString(),
           last_call_duration: parseInt(row['CallDuration']) || 0,
           pending_recall: false,
+          assigned_to: assignedId,
         };
       }).filter(l => l.name && l.phone);
 
@@ -257,11 +265,23 @@ const LeadManagement: React.FC = () => {
     }
   };
 
+  const getFilteredIds = () => {
+    return leads.filter(l => {
+      const matchesSearch = l.name.toLowerCase().includes(search.toLowerCase()) || l.phone.includes(search);
+      const matchesTab = filterTab === 'All' ? true :
+                         filterTab === 'Not Connected' ? (l.status === 'Not Connected' || !l.status) :
+                         l.status === filterTab;
+      return matchesSearch && matchesTab;
+    }).map(l => l.id);
+  };
+
   const toggleSelectAll = () => {
-    if (selectedLeads.length === leads.length) {
-      setSelectedLeads([]);
+    const visibleIds = getFilteredIds();
+    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedLeads.includes(id));
+    if (allVisibleSelected) {
+      setSelectedLeads(prev => prev.filter(id => !visibleIds.includes(id)));
     } else {
-      setSelectedLeads(leads.map(l => l.id));
+      setSelectedLeads(prev => [...new Set([...prev, ...visibleIds])]);
     }
   };
 
@@ -282,13 +302,14 @@ const LeadManagement: React.FC = () => {
   };
 
   const filteredLeads = leads.filter(l => {
-    if (employeeFilter === 'unassigned' && l.assigned_to) return false;
-    if (employeeFilter !== 'all' && employeeFilter !== 'unassigned' && l.assigned_to !== employeeFilter) return false;
     const matchesSearch = l.name.toLowerCase().includes(search.toLowerCase()) || l.phone.includes(search);
-    const matchesTab = filterTab === 'All' ? true : 
-                       filterTab === 'Not Connected' ? (l.status === 'Not Connected' || !l.status) : 
+    const matchesTab = filterTab === 'All' ? true :
+                       filterTab === 'Not Connected' ? (l.status === 'Not Connected' || !l.status) :
                        l.status === filterTab;
-    return matchesSearch && matchesTab;
+    const matchesEmployee = employeeFilter === 'all' ? true :
+                            employeeFilter === 'unassigned' ? !l.assigned_to :
+                            l.assigned_to === employeeFilter;
+    return matchesSearch && matchesTab && matchesEmployee;
   });
 
   return (
@@ -302,7 +323,7 @@ const LeadManagement: React.FC = () => {
             <Upload className="h-4 w-4 mr-2" /> Bulk Upload
           </Button>
           {selectedLeads.length > 0 && (
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <Button variant="secondary" onClick={() => setIsAssignModalOpen(true)} className="w-full lg:w-auto">
                 <UserPlus className="h-4 w-4 mr-2" /> Assign ({selectedLeads.length})
               </Button>
@@ -325,9 +346,9 @@ const LeadManagement: React.FC = () => {
         </div>
       </div>
 
-      {/* Employee Filter + Filter Tabs */}
-      <div className="flex flex-wrap gap-2 mb-3 items-center">
-        <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+      {/* Employee Filter + Tabs */}
+      <div className="flex flex-wrap gap-2 mb-2 items-center">
+        <Select value={employeeFilter} onValueChange={v => { setEmployeeFilter(v); setSelectedLeads([]); }}>
           <SelectTrigger className="w-44 h-8 text-xs">
             <SelectValue placeholder="All Employees" />
           </SelectTrigger>
@@ -340,34 +361,38 @@ const LeadManagement: React.FC = () => {
           </SelectContent>
         </Select>
         {employeeFilter !== 'all' && (
-          <Button size="sm" variant="ghost" className="text-xs h-8 text-slate-500" onClick={() => setEmployeeFilter('all')}>
-            ✕ Clear
-          </Button>
+          <Button size="sm" variant="ghost" className="h-8 text-xs text-slate-400 px-2" onClick={() => { setEmployeeFilter('all'); setSelectedLeads([]); }}>✕ Clear</Button>
         )}
       </div>
       <div className="flex flex-wrap gap-2 mb-4 items-center">
-        {(['All', 'Not Connected', 'Interested', 'Not Interested', 'Follow-up', 'Complete'] as const).map(tab => (
-          <Button
-            key={tab}
-            variant={filterTab === tab ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => { setFilterTab(tab); }}
-            className={cn("text-xs h-8",
-              filterTab === tab ? "bg-slate-800 text-white" : "text-slate-600 bg-white"
-            )}
-          >
-            {tab === 'All' ? `All (${leads.length})`
-             : tab === 'Not Connected' ? `Not Connected (${leads.filter(l => l.status === 'Not Connected' || !l.status).length})`
-             : `${tab} (${leads.filter(l => l.status === tab).length})`}
-          </Button>
-        ))}
-        {filterTab !== 'All' && filteredLeads.length > 0 && (
+        {(['All', 'Fresh', 'Not Connected', 'Interested', 'Not Interested', 'Follow-up', 'Complete'] as const).map(tab => {
+          const count = tab === 'All' ? filteredLeads.length :
+                        tab === 'Not Connected' ? filteredLeads.filter(l => l.status === 'Not Connected' || !l.status).length :
+                        filteredLeads.filter(l => l.status === tab).length;
+          return (
+            <Button
+              key={tab}
+              variant={filterTab === tab ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => { setFilterTab(tab); setSelectedLeads([]); }}
+              className={cn("text-xs h-8",
+                filterTab === tab ? "bg-slate-800 text-white" : "text-slate-600 bg-white"
+              )}
+            >
+              {tab} ({tab === 'All' ? filteredLeads.length : count})
+            </Button>
+          );
+        })}
+        {filterTab !== 'All' && (
           <Button
             size="sm" variant="outline"
             className="text-xs h-8 border-red-200 text-red-600 hover:bg-red-50 ml-auto"
             onClick={() => { setBulkDeleteStatus(filterTab as any); setIsBulkDeleteModalOpen(true); }}
           >
-            <Trash2 className="h-3 w-3 mr-1" /> Delete All {filterTab} ({filteredLeads.length})
+            <Trash2 className="h-3 w-3 mr-1" />
+            Delete All {filterTab} ({filterTab === 'Not Connected'
+              ? filteredLeads.filter(l => l.status === 'Not Connected' || !l.status).length
+              : filteredLeads.filter(l => l.status === filterTab).length})
           </Button>
         )}
       </div>
@@ -379,7 +404,7 @@ const LeadManagement: React.FC = () => {
               <TableRow className="bg-slate-50 hover:bg-slate-50 border-b border-slate-200">
                 <TableHead className="w-12 p-4">
                   <Checkbox 
-                    checked={selectedLeads.length === leads.length && leads.length > 0} 
+                    checked={filteredLeads.length > 0 && filteredLeads.every(l => selectedLeads.includes(l.id))} 
                     onCheckedChange={toggleSelectAll}
                     className="border-slate-300"
                   />
@@ -630,6 +655,7 @@ const LeadManagement: React.FC = () => {
                   <SelectValue placeholder="Select Status" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="Fresh">Fresh</SelectItem>
                   <SelectItem value="Not Connected">Not Connected</SelectItem>
                   <SelectItem value="Not Interested">Not Interested</SelectItem>
                   <SelectItem value="Interested">Interested</SelectItem>
