@@ -50,7 +50,9 @@ const ReportsPage: React.FC = () => {
       if (usersError) throw usersError;
 
       const { data: allLeads } = await supabase.from('leads').select('id,status,assigned_to');
-      const { data: allCalls } = await supabase.from('call_attempts').select('id,fake_call,user_id');
+      const { data: allCalls } = await supabase.from('call_attempts').select('id,fake_call,user_id,lead_id');
+      // Get IDs of Fresh leads to exclude from dialed count
+      const freshLeadIds = new Set((allLeads||[]).filter((l:any)=>l.status==='Fresh').map((l:any)=>l.id));
       const { data: allWA } = await supabase.from('whatsapp_messages').select('id,user_id');
 
       const stats = (users||[]).map((u: any) => {
@@ -58,6 +60,7 @@ const ReportsPage: React.FC = () => {
         return {
           id: u.id, name: u.name, role: u.role,
           totalAssigned: myLeads.length,
+          dialed: (allCalls||[]).filter((c:any)=>c.user_id===u.id && !freshLeadIds.has(c.lead_id)).length,
           genuineCalls: (allCalls||[]).filter((c:any)=>c.user_id===u.id&&!c.fake_call).length,
           fakeCalls: (allCalls||[]).filter((c:any)=>c.user_id===u.id&&c.fake_call).length,
           completions: myLeads.filter((l:any)=>l.status==='Complete').length,
@@ -136,6 +139,7 @@ const ReportsPage: React.FC = () => {
                 <TableRow>
                   <TableHead className="min-w-[150px]">Employee</TableHead>
                   <TableHead>Assigned</TableHead>
+                  <TableHead className="text-orange-600">Dialed</TableHead>
                   <TableHead>Genuine</TableHead>
                   <TableHead>Fake</TableHead>
                   <TableHead>Interested</TableHead>
@@ -147,11 +151,12 @@ const ReportsPage: React.FC = () => {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={9} className="text-center py-10">Loading metrics...</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={10} className="text-center py-10">Loading metrics...</TableCell></TableRow>
                 ) : filteredReports.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell className="font-medium">{row.name}</TableCell>
                     <TableCell>{row.totalAssigned}</TableCell>
+                    <TableCell className="text-orange-600 font-bold">{(row as any).dialed || 0}</TableCell>
                     <TableCell className="text-blue-600 font-semibold">{row.genuineCalls}</TableCell>
                     <TableCell className="text-red-500">{row.fakeCalls}</TableCell>
                     <TableCell className="text-purple-600 font-semibold">{(row as any).interested || 0}</TableCell>
