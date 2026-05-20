@@ -47,7 +47,8 @@ const LeadManagement: React.FC = () => {
   const [employees, setEmployees] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterTab, setFilterTab] = useState<'All' | 'Not Connected' | 'Interested' | 'Follow-up' | 'Complete'>('All');
+  const [filterTab, setFilterTab] = useState<'All' | 'Not Connected' | 'Interested' | 'Not Interested' | 'Follow-up' | 'Complete'>('All');
+  const [employeeFilter, setEmployeeFilter] = useState<string>('all');
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
   
   // Modals
@@ -55,7 +56,7 @@ const LeadManagement: React.FC = () => {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
-  const [bulkDeleteStatus, setBulkDeleteStatus] = useState<'Not Connected' | 'No Interested' | null>(null);
+  const [bulkDeleteStatus, setBulkDeleteStatus] = useState<string>('');
 
   // Form states
   const [newLead, setNewLead] = useState({
@@ -149,8 +150,31 @@ const LeadManagement: React.FC = () => {
     }
   };
 
+  const handleDeleteSingle = async (leadId: string) => {
+    if (!window.confirm('Delete this lead? This cannot be undone.')) return;
+    try {
+      const { error } = await supabase.from('leads').delete().eq('id', leadId);
+      if (error) throw error;
+      toast.success('Lead deleted');
+      setSelectedLeads(prev => prev.filter(id => id !== leadId));
+      fetchData();
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleBulkDeleteSelected = async () => {
+    if (selectedLeads.length === 0) return;
+    if (!window.confirm(`Delete ${selectedLeads.length} selected leads? This cannot be undone.`)) return;
+    try {
+      const { error } = await supabase.from('leads').delete().in('id', selectedLeads);
+      if (error) throw error;
+      toast.success(`${selectedLeads.length} leads deleted`);
+      setSelectedLeads([]);
+      fetchData();
+    } catch (e: any) { toast.error(e.message); }
+  };
+
   const handleBulkDeleteByStatus = async () => {
-    if (!bulkDeleteStatus) return;
+    if (!bulkDeleteStatus || bulkDeleteStatus === '') return;
     try {
       const { error } = await supabase
         .from('leads')
@@ -258,6 +282,8 @@ const LeadManagement: React.FC = () => {
   };
 
   const filteredLeads = leads.filter(l => {
+    if (employeeFilter === 'unassigned' && l.assigned_to) return false;
+    if (employeeFilter !== 'all' && employeeFilter !== 'unassigned' && l.assigned_to !== employeeFilter) return false;
     const matchesSearch = l.name.toLowerCase().includes(search.toLowerCase()) || l.phone.includes(search);
     const matchesTab = filterTab === 'All' ? true : 
                        filterTab === 'Not Connected' ? (l.status === 'Not Connected' || !l.status) : 
@@ -276,9 +302,14 @@ const LeadManagement: React.FC = () => {
             <Upload className="h-4 w-4 mr-2" /> Bulk Upload
           </Button>
           {selectedLeads.length > 0 && (
-            <Button variant="secondary" onClick={() => setIsAssignModalOpen(true)} className="w-full lg:w-auto">
-              <UserPlus className="h-4 w-4 mr-2" /> Assign ({selectedLeads.length})
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setIsAssignModalOpen(true)} className="w-full lg:w-auto">
+                <UserPlus className="h-4 w-4 mr-2" /> Assign ({selectedLeads.length})
+              </Button>
+              <Button variant="destructive" onClick={handleBulkDeleteSelected} className="w-full lg:w-auto">
+                <Trash2 className="h-4 w-4 mr-2" /> Delete ({selectedLeads.length})
+              </Button>
+            </div>
           )}
         </div>
         <div className="flex gap-2 w-full lg:w-auto">
@@ -294,21 +325,51 @@ const LeadManagement: React.FC = () => {
         </div>
       </div>
 
-      {/* Filter Tabs */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        {(['All', 'Not Connected', 'Interested', 'Follow-up', 'Complete'] as const).map(tab => (
+      {/* Employee Filter + Filter Tabs */}
+      <div className="flex flex-wrap gap-2 mb-3 items-center">
+        <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+          <SelectTrigger className="w-44 h-8 text-xs">
+            <SelectValue placeholder="All Employees" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">👥 All Employees</SelectItem>
+            <SelectItem value="unassigned">— Unassigned</SelectItem>
+            {employees.map((emp: any) => (
+              <SelectItem key={emp.id} value={emp.id}>{emp.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {employeeFilter !== 'all' && (
+          <Button size="sm" variant="ghost" className="text-xs h-8 text-slate-500" onClick={() => setEmployeeFilter('all')}>
+            ✕ Clear
+          </Button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2 mb-4 items-center">
+        {(['All', 'Not Connected', 'Interested', 'Not Interested', 'Follow-up', 'Complete'] as const).map(tab => (
           <Button
             key={tab}
             variant={filterTab === tab ? 'default' : 'outline'}
             size="sm"
-            onClick={() => setFilterTab(tab)}
+            onClick={() => { setFilterTab(tab); }}
             className={cn("text-xs h-8",
               filterTab === tab ? "bg-slate-800 text-white" : "text-slate-600 bg-white"
             )}
           >
-            {tab} ({tab === 'All' ? leads.length : tab === 'Not Connected' ? leads.filter(l => l.status === 'Not Connected' || !l.status).length : leads.filter(l => l.status === tab).length})
+            {tab === 'All' ? `All (${leads.length})`
+             : tab === 'Not Connected' ? `Not Connected (${leads.filter(l => l.status === 'Not Connected' || !l.status).length})`
+             : `${tab} (${leads.filter(l => l.status === tab).length})`}
           </Button>
         ))}
+        {filterTab !== 'All' && filteredLeads.length > 0 && (
+          <Button
+            size="sm" variant="outline"
+            className="text-xs h-8 border-red-200 text-red-600 hover:bg-red-50 ml-auto"
+            onClick={() => { setBulkDeleteStatus(filterTab as any); setIsBulkDeleteModalOpen(true); }}
+          >
+            <Trash2 className="h-3 w-3 mr-1" /> Delete All {filterTab} ({filteredLeads.length})
+          </Button>
+        )}
       </div>
 
       <div className="border rounded-xl bg-white shadow-sm overflow-hidden border-slate-200">
@@ -375,7 +436,7 @@ const LeadManagement: React.FC = () => {
                         <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-slate-100" onClick={() => handleOpenEdit(lead)}>
                           <Edit className="h-4 w-4 text-slate-500" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:bg-red-50">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:bg-red-50" onClick={() => handleDeleteSingle(lead.id)}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
