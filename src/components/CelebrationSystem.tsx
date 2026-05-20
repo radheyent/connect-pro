@@ -183,7 +183,7 @@ export const RecentActivityPanel: React.FC = () => {
         }
 
         // Sort by time desc, keep 5
-        const sorted = activityItems
+        const sorted = [...activityItems]
           .sort((a, b) => {
             const ta = a.time ? new Date(a.time).getTime() : 0;
             const tb = b.time ? new Date(b.time).getTime() : 0;
