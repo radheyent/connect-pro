@@ -170,7 +170,7 @@ const EmployeeLeadsPage: React.FC = () => {
   const startCall = (lead: Lead) => {
     setActiveLead(lead);
     setCallStartTime(Date.now());
-    setEditStatus(lead.status || 'Fresh');
+    setEditStatus(lead.status);
     setEditNotes(lead.notes || '');
     setEditFollowUpDate(lead.follow_up_date || '');
     setEditFollowUpTime(lead.follow_up_time || '');
@@ -472,7 +472,7 @@ Employee: ${profile.name}`;
                           className="bg-white border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 shadow-sm"
                           onClick={() => {
                               setActiveLead(lead);
-                              setEditStatus(lead.status || 'Fresh');
+                              setEditStatus(lead.status);
                               setEditNotes(lead.notes || '');
                               setEditFollowUpDate(lead.follow_up_date || '');
                               setEditFollowUpTime(lead.follow_up_time || '');
@@ -574,7 +574,7 @@ Employee: ${profile.name}`;
                       className="w-full bg-slate-50 border-slate-200 text-slate-600 font-bold text-[11px] h-9"
                       onClick={() => {
                         setActiveLead(lead);
-                        setEditStatus(lead.status || 'Fresh');
+                        setEditStatus(lead.status);
                         setEditNotes(lead.notes || '');
                         setEditFollowUpDate(lead.follow_up_date || '');
                         setEditFollowUpTime(lead.follow_up_time || '');
@@ -658,7 +658,7 @@ Employee: ${profile.name}`;
                    <SelectItem value="Not Interested">Not Interested</SelectItem>
                    <SelectItem value="Interested">Interested</SelectItem>
                    <SelectItem value="Follow-up">Follow-up</SelectItem>
-                     <SelectItem value="Complete">Complete</SelectItem>
+                   <SelectItem value="Complete">Complete</SelectItem>
                  </SelectContent>
                </Select>
             </div>
@@ -727,7 +727,7 @@ Employee: ${profile.name}`;
                    <SelectItem value="Not Interested">Not Interested</SelectItem>
                    <SelectItem value="Interested">Interested</SelectItem>
                    <SelectItem value="Follow-up">Follow-up</SelectItem>
-                     <SelectItem value="Complete">Complete</SelectItem>
+                   <SelectItem value="Complete">Complete</SelectItem>
                  </SelectContent>
                </Select>
              </div>
@@ -1015,7 +1015,7 @@ Employee: ${profile.name}`;
                       <Clock className="h-5 w-5 text-amber-600" />
                       <div>
                           <p className="text-[10px] font-bold text-amber-700 uppercase">Next Follow-up</p>
-                          <p className="text-sm font-bold text-amber-900">{format(new Date(activeLead.follow_up_date), 'PPP text-amber-900')} - {activeLead.follow_up_time}</p>
+                          <p className="text-sm font-bold text-amber-900">{format(new Date(activeLead.follow_up_date), 'PPP')} - {activeLead.follow_up_time}</p>
                       </div>
                   </div>
               )}
@@ -1053,7 +1053,7 @@ Employee: ${profile.name}`;
                   variant="outline"
                   onClick={() => {
                     setIsDetailsModalOpen(false);
-                    setEditStatus(activeLead?.status || '');
+                    setEditStatus(activeLead?.status || 'Fresh');
                     setEditNotes(activeLead?.notes || '');
                     setEditFollowUpDate(activeLead?.follow_up_date || '');
                     setEditFollowUpTime(activeLead?.follow_up_time || '');
