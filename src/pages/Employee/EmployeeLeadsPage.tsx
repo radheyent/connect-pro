@@ -50,6 +50,8 @@ const EmployeeLeadsPage: React.FC = () => {
   // Call Modal State
   const [activeLead, setActiveLead] = useState<Lead | null>(null);
   const [callStartTime, setCallStartTime] = useState<number | null>(null);
+  // Tracks which leads this employee has called (session + DB)
+  const [calledLeadIds, setCalledLeadIds] = useState<Set<string>>(new Set());
   const [isCallModalOpen, setIsCallModalOpen] = useState(false);
 
   // Edit Lead State
@@ -136,6 +138,15 @@ const EmployeeLeadsPage: React.FC = () => {
 
       if (error) throw error;
       setLeads(data || []);
+
+      // Load called lead IDs from DB for this user
+      const { data: callData } = await supabase
+        .from('call_attempts')
+        .select('lead_id')
+        .eq('user_id', user.id);
+      if (callData) {
+        setCalledLeadIds(new Set(callData.map((c: any) => c.lead_id)));
+      }
     } catch (error: any) {
       toast.error('Failed to fetch leads');
     } finally {
@@ -170,10 +181,12 @@ const EmployeeLeadsPage: React.FC = () => {
   const startCall = (lead: Lead) => {
     setActiveLead(lead);
     setCallStartTime(Date.now());
-    setEditStatus(lead.status);
+    setEditStatus(lead.status || 'Fresh');
     setEditNotes(lead.notes || '');
     setEditFollowUpDate(lead.follow_up_date || '');
     setEditFollowUpTime(lead.follow_up_time || '');
+    // Mark this lead as called immediately (so UPDATE button enables)
+    setCalledLeadIds(prev => new Set([...prev, lead.id]));
     setIsCallModalOpen(true);
     window.location.href = `tel:${lead.phone}`;
   };
@@ -221,6 +234,15 @@ const EmployeeLeadsPage: React.FC = () => {
     } catch (error: any) {
       toast.error('Failed to log call');
     }
+  };
+
+  // Gate: can this lead's status be updated?
+  // Rule: ONLY enforced for Fresh leads — must call first
+  // All other statuses (Not Connected, Interested, Follow-up, etc.) are freely updatable
+  const canUpdateStatus = (lead: Lead) => {
+    if (!lead) return true; // safe default
+    if (lead.status !== 'Fresh') return true; // only Fresh is gated
+    return calledLeadIds.has(lead.id) || !!lead.last_call_date;
   };
 
   const handleUpdateStatus = async () => {
@@ -408,10 +430,6 @@ Employee: ${profile.name}`;
                           className="flex items-center gap-2 cursor-pointer hover:text-blue-600 transition-colors"
                           onClick={() => {
                             setActiveLead(lead);
-                            setEditStatus(lead.status || 'Fresh');
-                            setEditNotes(lead.notes || '');
-                            setEditFollowUpDate(lead.follow_up_date || '');
-                            setEditFollowUpTime(lead.follow_up_time || '');
                             setIsDetailsModalOpen(true);
                           }}
                         >
@@ -469,10 +487,20 @@ Employee: ${profile.name}`;
                         <Button 
                           variant="outline" 
                           size="sm"
-                          className="bg-white border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 shadow-sm"
+                          className={cn(
+                            "font-bold text-xs shadow-sm",
+                            canUpdateStatus(lead)
+                              ? "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                              : "bg-slate-50 border-slate-100 text-slate-300 cursor-not-allowed"
+                          )}
+                          title={canUpdateStatus(lead) ? 'Update lead status' : 'Call karo pehle'}
                           onClick={() => {
+                              if (!canUpdateStatus(lead)) {
+                                toast.error('📞 Please make a call first to update the status', { duration: 3000 });
+                                return;
+                              }
                               setActiveLead(lead);
-                              setEditStatus(lead.status);
+                              setEditStatus(lead.status || 'Fresh');
                               setEditNotes(lead.notes || '');
                               setEditFollowUpDate(lead.follow_up_date || '');
                               setEditFollowUpTime(lead.follow_up_time || '');
@@ -573,8 +601,12 @@ Employee: ${profile.name}`;
                       size="sm"
                       className="w-full bg-slate-50 border-slate-200 text-slate-600 font-bold text-[11px] h-9"
                       onClick={() => {
+                        if (!canUpdateStatus(lead)) {
+                          toast.error('📞 Please make a call first to update the status', { duration: 3000 });
+                          return;
+                        }
                         setActiveLead(lead);
-                        setEditStatus(lead.status);
+                        setEditStatus(lead.status || 'Fresh');
                         setEditNotes(lead.notes || '');
                         setEditFollowUpDate(lead.follow_up_date || '');
                         setEditFollowUpTime(lead.follow_up_time || '');
@@ -653,12 +685,13 @@ Employee: ${profile.name}`;
                    <SelectValue placeholder="Select Status" />
                  </SelectTrigger>
                  <SelectContent>
-                   <SelectItem value="Fresh">Fresh</SelectItem>
                    <SelectItem value="Not Connected">Not Connected</SelectItem>
                    <SelectItem value="Not Interested">Not Interested</SelectItem>
                    <SelectItem value="Interested">Interested</SelectItem>
                    <SelectItem value="Follow-up">Follow-up</SelectItem>
-                   <SelectItem value="Complete">Complete</SelectItem>
+                   {(profile?.role === 'admin' || profile?.role === 'field_boy') && (
+                     <SelectItem value="Complete">Complete</SelectItem>
+                   )}
                  </SelectContent>
                </Select>
             </div>
@@ -722,12 +755,13 @@ Employee: ${profile.name}`;
                    <SelectValue placeholder="Select Status" />
                  </SelectTrigger>
                  <SelectContent>
-                   <SelectItem value="Fresh">Fresh</SelectItem>
                    <SelectItem value="Not Connected">Not Connected</SelectItem>
                    <SelectItem value="Not Interested">Not Interested</SelectItem>
                    <SelectItem value="Interested">Interested</SelectItem>
                    <SelectItem value="Follow-up">Follow-up</SelectItem>
-                   <SelectItem value="Complete">Complete</SelectItem>
+                   {(profile?.role === 'admin' || profile?.role === 'field_boy') && (
+                     <SelectItem value="Complete">Complete</SelectItem>
+                   )}
                  </SelectContent>
                </Select>
              </div>
@@ -1015,7 +1049,7 @@ Employee: ${profile.name}`;
                       <Clock className="h-5 w-5 text-amber-600" />
                       <div>
                           <p className="text-[10px] font-bold text-amber-700 uppercase">Next Follow-up</p>
-                          <p className="text-sm font-bold text-amber-900">{format(new Date(activeLead.follow_up_date), 'PPP')} - {activeLead.follow_up_time}</p>
+                          <p className="text-sm font-bold text-amber-900">{format(new Date(activeLead.follow_up_date), 'PPP text-amber-900')} - {activeLead.follow_up_time}</p>
                       </div>
                   </div>
               )}
@@ -1052,6 +1086,10 @@ Employee: ${profile.name}`;
               <Button 
                   variant="outline"
                   onClick={() => {
+                    if (!canUpdateStatus(activeLead!)) {
+                      toast.error('📞 Please make a call first to update the status', { duration: 3000 });
+                      return;
+                    }
                     setIsDetailsModalOpen(false);
                     setEditStatus(activeLead?.status || 'Fresh');
                     setEditNotes(activeLead?.notes || '');
@@ -1059,9 +1097,13 @@ Employee: ${profile.name}`;
                     setEditFollowUpTime(activeLead?.follow_up_time || '');
                     setIsEditModalOpen(true);
                   }}
-                  className="flex-1 border-slate-300 h-10 font-bold"
+                  className={`flex-1 h-10 font-bold ${
+                    canUpdateStatus(activeLead!)
+                      ? 'border-slate-300'
+                      : 'border-slate-100 text-slate-300 cursor-not-allowed'
+                  }`}
               >
-                  UPDATE
+                  {canUpdateStatus(activeLead!) ? 'UPDATE' : '🔒 Call First'}
               </Button>
               <Button 
                 variant="outline"
