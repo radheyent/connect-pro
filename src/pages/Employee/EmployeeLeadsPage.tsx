@@ -1086,16 +1086,24 @@ Employee: ${profile.name}`;
               <Button 
                   variant="outline"
                   onClick={() => {
+                    if (!canUpdateStatus(activeLead!)) {
+                      toast.error('📞 Please make a call first to update the status', { duration: 3000 });
+                      return;
+                    }
                     setIsDetailsModalOpen(false);
-                    setEditStatus(activeLead?.status || '');
+                    setEditStatus(activeLead?.status || 'Fresh');
                     setEditNotes(activeLead?.notes || '');
                     setEditFollowUpDate(activeLead?.follow_up_date || '');
                     setEditFollowUpTime(activeLead?.follow_up_time || '');
                     setIsEditModalOpen(true);
                   }}
-                  className="flex-1 border-slate-300 h-10 font-bold"
+                  className={`flex-1 h-10 font-bold ${
+                    canUpdateStatus(activeLead!)
+                      ? 'border-slate-300'
+                      : 'border-slate-100 text-slate-300 cursor-not-allowed'
+                  }`}
               >
-                  UPDATE
+                  {canUpdateStatus(activeLead!) ? 'UPDATE' : '🔒 Call First'}
               </Button>
               <Button 
                 variant="outline"
