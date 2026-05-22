@@ -237,10 +237,11 @@ const EmployeeLeadsPage: React.FC = () => {
   };
 
   // Gate: can this lead's status be updated?
-  // Rule: must have called this lead at least once
+  // Rule: ONLY enforced for Fresh leads — must call first
+  // All other statuses (Not Connected, Interested, Follow-up, etc.) are freely updatable
   const canUpdateStatus = (lead: Lead) => {
-    if (!lead) return false;
-    // If lead already has a call history (last_call_date set) OR called in this session
+    if (!lead) return true; // safe default
+    if (lead.status !== 'Fresh') return true; // only Fresh is gated
     return calledLeadIds.has(lead.id) || !!lead.last_call_date;
   };
 
@@ -495,7 +496,7 @@ Employee: ${profile.name}`;
                           title={canUpdateStatus(lead) ? 'Update lead status' : 'Call karo pehle'}
                           onClick={() => {
                               if (!canUpdateStatus(lead)) {
-                                toast.error('📞 Pehle call karo — tab hi status update hoga', { duration: 3000 });
+                                toast.error('📞 Please make a call first to update the status', { duration: 3000 });
                                 return;
                               }
                               setActiveLead(lead);
@@ -601,7 +602,7 @@ Employee: ${profile.name}`;
                       className="w-full bg-slate-50 border-slate-200 text-slate-600 font-bold text-[11px] h-9"
                       onClick={() => {
                         if (!canUpdateStatus(lead)) {
-                          toast.error('📞 Pehle call karo — tab hi status update hoga', { duration: 3000 });
+                          toast.error('📞 Please make a call first to update the status', { duration: 3000 });
                           return;
                         }
                         setActiveLead(lead);
