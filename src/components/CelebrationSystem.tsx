@@ -112,10 +112,7 @@ export const RecentActivityPanel: React.FC = () => {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!user || !profile) {
-      setLoading(false);
-      return;
-    }
+    if (!user || !profile) { setLoading(false); return; }
     setLoading(true);
 
     const load = async () => {
@@ -182,13 +179,10 @@ export const RecentActivityPanel: React.FC = () => {
           }
         }
 
-        // Sort by time desc, keep 5
-        const sorted = [...activityItems]
-          .sort((a, b) => {
-            const ta = a.time ? new Date(a.time).getTime() : 0;
-            const tb = b.time ? new Date(b.time).getTime() : 0;
-            return tb - ta;
-          })
+        // Sort by time, keep 5 (last call always in because it has its own slot)
+        const sorted = activityItems
+          .filter(i => i.time)
+          .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
           .slice(0, 5);
 
         setItems(sorted);
@@ -201,21 +195,18 @@ export const RecentActivityPanel: React.FC = () => {
 
     load();
 
-    // Realtime + polling
+    // Single combined realtime channel + 60s poll (saves battery/memory)
     const uid = user.id;
-    const ch1 = supabase.channel(`ra-${uid}-leads`)
+    const ch = supabase.channel(`ra-${uid}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leads' },
-        (p) => { if (p.new?.status === 'Complete') load(); }).subscribe();
-    const ch2 = supabase.channel(`ra-${uid}-ann`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'announcements' }, load).subscribe();
-    const ch3 = supabase.channel(`ra-${uid}-calls`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_attempts' }, load).subscribe();
-    const poll = setInterval(load, 20000);
+        (p) => { if (p.new?.status === 'Complete') load(); })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'announcements' }, load)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_attempts' }, load)
+      .subscribe();
+    const poll = setInterval(load, 60000);
 
     return () => {
-      supabase.removeChannel(ch1);
-      supabase.removeChannel(ch2);
-      supabase.removeChannel(ch3);
+      supabase.removeChannel(ch);
       clearInterval(poll);
     };
   }, [user?.id, profile?.id]);
@@ -329,7 +320,7 @@ const CelebrationSystem: React.FC = () => {
       ).subscribe();
 
     // Polling fallback every 20s (in case realtime misses)
-    const poll = setInterval(checkNewSales, 20000);
+    const poll = setInterval(checkNewSales, 60000);
 
     return () => {
       supabase.removeChannel(channel);
