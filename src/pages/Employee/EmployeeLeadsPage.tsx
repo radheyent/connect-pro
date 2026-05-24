@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { supabase, Lead } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
@@ -42,6 +42,8 @@ const EmployeeLeadsPage: React.FC = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [searchRaw, setSearchRaw] = useState('');
+  const searchTimer = useRef<any>(null);
   const [filterTab, setFilterTab] = useState<'Fresh' | 'Not Connected' | 'Interested' | 'Complete' | 'Follow-up'>('Fresh');
   
   // Pagination State
@@ -88,9 +90,16 @@ const EmployeeLeadsPage: React.FC = () => {
   // Lead View Modal State
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
 
+  const handleSearchChange = useCallback((val: string) => {
+    setSearchRaw(val);
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => { setSearch(val); setCurrentPage(1); }, 300);
+  }, []);
+
   useEffect(() => {
     fetchLeads();
-  }, [user]);
+    return () => clearTimeout(searchTimer.current);
+  }, []);
 
   const triggerSaleClosed = (employeeName: string, details: string) => {
     confetti({
@@ -125,7 +134,7 @@ const EmployeeLeadsPage: React.FC = () => {
     }
   };
 
-  const fetchLeads = async () => {
+  const fetchLeads = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
@@ -152,7 +161,7 @@ const EmployeeLeadsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   const handleAddLead = async () => {
     if (!newLeadData.name || !newLeadData.phone) {
@@ -178,7 +187,7 @@ const EmployeeLeadsPage: React.FC = () => {
     }
   };
 
-  const startCall = (lead: Lead) => {
+  const startCall = useCallback((lead: Lead) => {
     setActiveLead(lead);
     setCallStartTime(Date.now());
     setEditStatus(lead.status || 'Fresh');
@@ -189,7 +198,7 @@ const EmployeeLeadsPage: React.FC = () => {
     setCalledLeadIds(prev => new Set([...prev, lead.id]));
     setIsCallModalOpen(true);
     window.location.href = `tel:${lead.phone}`;
-  };
+  }, []);
 
   const endCall = async () => {
     if (!activeLead || !callStartTime) return;
@@ -303,14 +312,31 @@ Employee: ${profile.name}`;
     }
   };
 
-  const filteredLeads = leads.filter(l => {
-    const matchesSearch = l.name.toLowerCase().includes(search.toLowerCase()) || l.phone.includes(search);
-    const matchesTab = l.status === filterTab;
-    return matchesSearch && matchesTab;
-  });
+  // Memoized tab counts — computed once per leads change
+  const tabCounts = useMemo(() => ({
+    Fresh:         leads.filter(l => l.status === 'Fresh').length,
+    'Not Connected': leads.filter(l => l.status === 'Not Connected').length,
+    Interested:    leads.filter(l => l.status === 'Interested').length,
+    Complete:      leads.filter(l => l.status === 'Complete').length,
+    'Follow-up':   leads.filter(l => l.status === 'Follow-up').length,
+    'Not Interested': leads.filter(l => l.status === 'Not Interested').length,
+  }), [leads]);
 
-  const totalPages = Math.ceil(filteredLeads.length / PAGE_SIZE);
-  const currentLeads = filteredLeads.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  // Memoized filtered list — only recalculates when deps change
+  const filteredLeads = useMemo(() => {
+    const sl = search.toLowerCase();
+    return leads.filter(l => {
+      if (sl && !l.name.toLowerCase().includes(sl) && !l.phone.includes(search)) return false;
+      return l.status === filterTab;
+    });
+  }, [leads, search, filterTab]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredLeads.length / PAGE_SIZE));
+  // Memoized current page slice
+  const currentLeads = useMemo(() =>
+    filteredLeads.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [filteredLeads, currentPage]
+  );
 
   return (
     <div className="space-y-6">
@@ -349,7 +375,7 @@ Employee: ${profile.name}`;
               onClick={() => { setFilterTab('Fresh'); setCurrentPage(1); }}
               className={cn("text-xs h-8", filterTab === 'Fresh' ? "bg-slate-800 text-white hover:bg-slate-700" : "text-slate-600 bg-white")}
             >
-              🆕 Fresh ({leads.filter(l => l.status === 'Fresh').length})
+              🆕 Fresh ({tabCounts['Fresh']})
             </Button>
             <Button 
               variant={filterTab === 'Not Connected' ? 'default' : 'outline'} 
@@ -357,7 +383,7 @@ Employee: ${profile.name}`;
               onClick={() => { setFilterTab('Not Connected'); setCurrentPage(1); }}
               className={cn("text-xs h-8", filterTab === 'Not Connected' ? "bg-red-600 text-white hover:bg-red-700" : "text-slate-600 bg-white")}
             >
-              ❌ Not Connected ({leads.filter(l => l.status === 'Not Connected').length})
+              ❌ Not Connected ({tabCounts['Not Connected']})
             </Button>
             <Button 
               variant={filterTab === 'Interested' ? 'default' : 'outline'} 
@@ -365,7 +391,7 @@ Employee: ${profile.name}`;
               onClick={() => { setFilterTab('Interested'); setCurrentPage(1); }}
               className={cn("text-xs h-8", filterTab === 'Interested' ? "bg-green-600 text-white hover:bg-green-700" : "text-slate-600 bg-white")}
             >
-              Interested ({leads.filter(l => l.status === 'Interested').length})
+              Interested ({tabCounts['Interested']})
             </Button>
             <Button 
               variant={filterTab === 'Complete' ? 'default' : 'outline'} 
@@ -373,7 +399,7 @@ Employee: ${profile.name}`;
               onClick={() => { setFilterTab('Complete'); setCurrentPage(1); }}
               className={cn("text-xs h-8", filterTab === 'Complete' ? "bg-blue-600 text-white hover:bg-blue-700" : "text-slate-600 bg-white")}
             >
-              Completed ({leads.filter(l => l.status === 'Complete').length})
+              Completed ({tabCounts['Complete']})
             </Button>
             <Button 
               variant={filterTab === 'Follow-up' ? 'default' : 'outline'} 
@@ -381,7 +407,7 @@ Employee: ${profile.name}`;
               onClick={() => { setFilterTab('Follow-up'); setCurrentPage(1); }}
               className={cn("text-xs h-8", filterTab === 'Follow-up' ? "bg-amber-500 text-white hover:bg-amber-600" : "text-slate-600 bg-white")}
             >
-              Follow-ups ({leads.filter(l => l.status === 'Follow-up').length})
+              Follow-ups ({tabCounts['Follow-up']})
             </Button>
           </div>
           <div className="flex gap-2">
