@@ -1,0 +1,163 @@
+/* ================================================================
+   CONNECT PRO — GLOBAL DARK MODE
+   Import in src/main.tsx:  import './dark.css';
+   ================================================================ */
+
+/* ── Base ────────────────────────────────────────────────────── */
+.dark body,
+.dark #root {
+  background-color: #020617;
+  color: #e2e8f0;
+}
+
+/* ── Backgrounds ─────────────────────────────────────────────── */
+.dark .bg-white          { background-color: #1e293b !important; }
+.dark .bg-slate-50       { background-color: #0f172a !important; }
+.dark .bg-slate-50\/50   { background-color: #0f172a !important; }
+.dark .bg-slate-100      { background-color: #1e293b !important; }
+.dark .bg-slate-200      { background-color: #334155 !important; }
+.dark .bg-gray-50        { background-color: #0f172a !important; }
+.dark .bg-gray-100       { background-color: #1e293b !important; }
+
+/* Cards */
+.dark [class*="Card"],
+.dark .rounded-xl.border,
+.dark .rounded-2xl.border,
+.dark .rounded-lg.border {
+  background-color: #1e293b;
+  border-color: #334155;
+}
+
+/* ── Text ────────────────────────────────────────────────────── */
+.dark .text-slate-900    { color: #f1f5f9 !important; }
+.dark .text-slate-800    { color: #e2e8f0 !important; }
+.dark .text-slate-700    { color: #cbd5e1 !important; }
+.dark .text-slate-600    { color: #94a3b8 !important; }
+.dark .text-slate-500    { color: #64748b !important; }
+.dark .text-gray-900     { color: #f1f5f9 !important; }
+.dark .text-gray-700     { color: #cbd5e1 !important; }
+.dark .text-muted-foreground { color: #64748b !important; }
+
+/* ── Borders ─────────────────────────────────────────────────── */
+.dark .border-slate-100  { border-color: #1e293b !important; }
+.dark .border-slate-200  { border-color: #334155 !important; }
+.dark .border-slate-300  { border-color: #475569 !important; }
+.dark .border-gray-200   { border-color: #334155 !important; }
+.dark .divide-slate-100 > * + * { border-color: #1e293b !important; }
+
+/* ── Inputs ──────────────────────────────────────────────────── */
+.dark input,
+.dark textarea,
+.dark select {
+  background-color: #0f172a !important;
+  border-color: #334155 !important;
+  color: #e2e8f0 !important;
+}
+.dark input::placeholder,
+.dark textarea::placeholder { color: #475569 !important; }
+.dark input:focus,
+.dark textarea:focus {
+  border-color: #3b82f6 !important;
+  outline-color: #3b82f6 !important;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+.dark button[class*="outline"],
+.dark .border.bg-white {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+  color: #e2e8f0 !important;
+}
+.dark button[class*="ghost"]:hover {
+  background-color: #334155 !important;
+}
+.dark button[class*="secondary"] {
+  background-color: #334155 !important;
+  color: #e2e8f0 !important;
+}
+
+/* ── Tables ──────────────────────────────────────────────────── */
+.dark table { color: #e2e8f0; }
+.dark thead tr,
+.dark .bg-slate-50 tr { background-color: #0f172a !important; }
+.dark tbody tr { background-color: #1e293b; }
+.dark tbody tr:hover { background-color: #263348 !important; }
+.dark th { color: #94a3b8 !important; background-color: #0f172a !important; }
+.dark td { color: #cbd5e1 !important; border-color: #1e293b !important; }
+
+/* ── Badges ──────────────────────────────────────────────────── */
+.dark .bg-slate-100.text-slate-600 {
+  background-color: #334155 !important;
+  color: #94a3b8 !important;
+}
+
+/* ── Dialogs / Modals ────────────────────────────────────────── */
+.dark [role="dialog"],
+.dark [data-radix-popper-content-wrapper] {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+  color: #e2e8f0 !important;
+}
+.dark [role="dialog"] h2,
+.dark [role="dialog"] p { color: #e2e8f0 !important; }
+.dark [role="dialog"] .bg-slate-50 { background-color: #0f172a !important; }
+
+/* ── Select dropdowns ────────────────────────────────────────── */
+.dark [role="listbox"],
+.dark [role="option"],
+.dark [data-radix-select-content] {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+  color: #e2e8f0 !important;
+}
+.dark [role="option"]:hover,
+.dark [role="option"]:focus {
+  background-color: #334155 !important;
+}
+
+/* ── Cards specific ──────────────────────────────────────────── */
+.dark [class*="CardHeader"] { background-color: #0f172a !important; border-color: #334155 !important; }
+.dark [class*="CardTitle"]  { color: #f1f5f9 !important; }
+.dark [class*="CardDescription"] { color: #94a3b8 !important; }
+.dark [class*="CardContent"] { background-color: #1e293b !important; }
+
+/* ── Gradient backgrounds (Today section, etc.) ──────────────── */
+.dark .from-orange-50  { --tw-gradient-from: #1e1209 !important; }
+.dark .to-amber-50     { --tw-gradient-to: #1c1107 !important; }
+.dark .from-blue-50    { --tw-gradient-from: #0d1729 !important; }
+.dark .to-sky-50       { --tw-gradient-to: #0c1829 !important; }
+.dark .from-green-50   { --tw-gradient-from: #0a1a0e !important; }
+.dark .to-emerald-50   { --tw-gradient-to: #091a10 !important; }
+.dark .from-slate-50   { --tw-gradient-from: #0f172a !important; }
+.dark .bg-slate-50\/50 { background-color: rgba(15,23,42,0.5) !important; }
+
+/* ── Hover states ────────────────────────────────────────────── */
+.dark .hover\:bg-slate-50:hover  { background-color: #263348 !important; }
+.dark .hover\:bg-slate-100:hover { background-color: #334155 !important; }
+.dark .hover\:bg-red-50:hover    { background-color: #2d1515 !important; }
+.dark .hover\:bg-blue-50:hover   { background-color: #0d1729 !important; }
+
+/* ── Activity panel ──────────────────────────────────────────── */
+.dark .from-green-50.to-emerald-50 { background: #0a1a0e !important; }
+.dark .from-blue-50.to-sky-50      { background: #0d1729 !important; }
+.dark .border-green-100 { border-color: #14532d !important; }
+.dark .border-blue-100  { border-color: #1e3a5f !important; }
+
+/* ── Scrollbar (webkit) ──────────────────────────────────────── */
+.dark ::-webkit-scrollbar { width: 6px; height: 6px; }
+.dark ::-webkit-scrollbar-track { background: #0f172a; }
+.dark ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+/* ── Toast (sonner) ──────────────────────────────────────────── */
+.dark [data-sonner-toaster] [data-styled="true"] {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+  color: #e2e8f0 !important;
+}
+
+/* ── Checkbox ────────────────────────────────────────────────── */
+.dark [role="checkbox"] {
+  border-color: #475569 !important;
+  background-color: #0f172a !important;
+}
