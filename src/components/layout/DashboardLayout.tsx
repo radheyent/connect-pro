@@ -5,7 +5,7 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   LayoutDashboard, Users, Share2, PhoneMissed, 
-  BarChart3, Database, LogOut, Menu, Sun, Moon, Bell
+  BarChart3, Database, LogOut, Menu, Sun, Moon, Bell, Wallet, Car
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -58,6 +58,8 @@ const DashboardLayout: React.FC = () => {
     { name: 'Backup',        path: '/admin/backup',       icon: Database,        roles: ['admin'] },
     { name: 'My Leads',      path: '/employee/leads',     icon: Users,           roles: ['employee'] },
     { name: 'Announcements', path: '/announcements',      icon: Bell,            roles: ['admin','employee','field_boy'] },
+    { name: 'Expenses',       path: '/admin/expenses',    icon: Wallet,          roles: ['admin'] },
+    { name: 'My Conveyance',  path: '/field-boy/conveyance', icon: Car,          roles: ['field_boy'] },
   ].filter(item => item.roles.includes(profile?.role || ''));
 
   const handleSignOut = async () => { await signOut(); navigate('/login'); };
