@@ -26,7 +26,7 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
-import { AlertCircle, RefreshCcw, UserPlus, PhoneOff } from 'lucide-react';
+import { AlertCircle, RefreshCcw, UserPlus, PhoneOff, Trash2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 
@@ -37,6 +37,9 @@ const FakeCallsPanel: React.FC = () => {
   const [activeLead, setActiveLead] = useState<any | null>(null);
   const [isReassignModalOpen, setIsReassignModalOpen] = useState(false);
   const [assigneeId, setAssigneeId] = useState('');
+  const [deleteTarget, setDeleteTarget]   = useState<any>(null);
+  const [isDeleteAllOpen, setIsDeleteAllOpen] = useState(false);
+  const [isDeleting, setIsDeleting]       = useState(false);
 
   useEffect(() => {
     fetchFakeLeads();
@@ -60,33 +63,32 @@ const FakeCallsPanel: React.FC = () => {
         return;
       }
 
-      // Step 1: Get lead IDs that have fake calls
-      const { data: fakeCalls, error: fcError } = await supabase
+      // Step 1: Get lead IDs with fake calls
+      const { data: fakeCalls, error: fcErr } = await supabase
         .from('call_attempts').select('lead_id').eq('fake_call', true);
-      if (fcError) throw fcError;
+      if (fcErr) throw fcErr;
 
-      const fakeLeadIds = [...new Set((fakeCalls||[]).map((c:any)=>c.lead_id))];
+      const fakeLeadIds = [...new Set((fakeCalls || []).map((c: any) => c.lead_id))];
       if (fakeLeadIds.length === 0) { setLeads([]); return; }
 
-      // Step 2: Get those leads (simple select, no join)
-      const { data: leadsData, error: leadsError } = await supabase
+      // Step 2: Fetch those leads (simple select)
+      const { data: leadsData, error } = await supabase
         .from('leads').select('*')
         .in('id', fakeLeadIds)
         .neq('status', 'Complete')
         .order('last_call_date', { ascending: false });
-      if (leadsError) throw leadsError;
+      if (error) throw error;
 
-      // Step 3: Get assigned user names separately
+      // Step 3: Enrich with employee names separately
       const assignedIds = [...new Set((leadsData||[]).map((l:any)=>l.assigned_to).filter(Boolean))];
-      let nameMap: Record<string,string> = {};
+      const empMap: Record<string,string> = {};
       if (assignedIds.length > 0) {
-        const { data: profiles } = await supabase.from('user_profiles').select('id,name').in('id', assignedIds);
-        (profiles||[]).forEach((p:any)=>{ nameMap[p.id]=p.name; });
+        const { data: emps } = await supabase.from('user_profiles').select('id,name').in('id', assignedIds);
+        (emps||[]).forEach((e:any) => { empMap[e.id] = e.name; });
       }
 
-      const enriched = (leadsData||[]).map((l:any)=>({
-        ...l,
-        assigned_user: l.assigned_to ? { name: nameMap[l.assigned_to]||'Unknown' } : null
+      const enriched = (leadsData||[]).map((l:any) => ({
+        ...l, assigned_user: l.assigned_to ? { name: empMap[l.assigned_to] || 'Unknown' } : null
       }));
       setLeads(enriched);
     } catch (error: any) {
@@ -145,6 +147,33 @@ const FakeCallsPanel: React.FC = () => {
     }
   };
 
+  const handleDeleteSingle = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      const { error } = await supabase.from('leads').delete().eq('id', deleteTarget.id);
+      if (error) throw error;
+      toast.success(`"${deleteTarget.name}" deleted`);
+      setDeleteTarget(null);
+      fetchFakeLeads();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setIsDeleting(false); }
+  };
+
+  const handleDeleteAll = async () => {
+    if (leads.length === 0) return;
+    setIsDeleting(true);
+    try {
+      const ids = leads.map(l => l.id);
+      const { error } = await supabase.from('leads').delete().in('id', ids);
+      if (error) throw error;
+      toast.success(`${ids.length} fake call leads deleted`);
+      setIsDeleteAllOpen(false);
+      fetchFakeLeads();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setIsDeleting(false); }
+  };
+
   return (
     <div className="space-y-6">
       <Card border-destructive>
@@ -153,8 +182,14 @@ const FakeCallsPanel: React.FC = () => {
             <PhoneOff className="h-5 w-5 text-red-500" />
             <CardTitle>Fake Call Detection Panel</CardTitle>
           </div>
-          <CardDescription>
-            Review leads with suspicious call durations (under 5s) that aren't completed.
+          <CardDescription className="flex items-center justify-between flex-wrap gap-2">
+            <span>Review leads with suspicious call durations (under 10s) that aren't completed.</span>
+            {leads.length > 0 && (
+              <Button variant="destructive" size="sm" className="h-7 text-xs"
+                onClick={() => setIsDeleteAllOpen(true)}>
+                <Trash2 className="h-3.5 w-3.5 mr-1" />Delete All ({leads.length})
+              </Button>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -189,26 +224,17 @@ const FakeCallsPanel: React.FC = () => {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className="h-8 gap-1"
-                        onClick={() => handleMarkForRecall(lead.id)}
-                      >
-                        <RefreshCcw className="h-3.5 w-3.5" />
-                        Recall
+                      <Button variant="outline" size="sm" className="h-8 gap-1"
+                        onClick={() => handleMarkForRecall(lead.id)}>
+                        <RefreshCcw className="h-3.5 w-3.5" />Recall
                       </Button>
-                      <Button 
-                        variant="secondary" 
-                        size="sm" 
-                        className="h-8 gap-1"
-                        onClick={() => {
-                          setActiveLead(lead);
-                          setIsReassignModalOpen(true);
-                        }}
-                      >
-                        <UserPlus className="h-3.5 w-3.5" />
-                        Reassign
+                      <Button variant="secondary" size="sm" className="h-8 gap-1"
+                        onClick={() => { setActiveLead(lead); setIsReassignModalOpen(true); }}>
+                        <UserPlus className="h-3.5 w-3.5" />Reassign
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:bg-red-50"
+                        onClick={() => setDeleteTarget(lead)}>
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </TableCell>
@@ -218,6 +244,55 @@ const FakeCallsPanel: React.FC = () => {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Single Delete Confirm */}
+      <Dialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null); }}>
+        <DialogContent className="sm:max-w-[360px]">
+          <DialogHeader>
+            <DialogTitle className="text-red-600 flex items-center gap-2">
+              <Trash2 className="h-4 w-4" /> Delete Lead
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-3">
+            <div className="p-3 bg-slate-50 rounded-lg border mb-3">
+              <p className="font-bold text-slate-900">{deleteTarget?.name}</p>
+              <p className="text-xs text-slate-500 font-mono">{deleteTarget?.phone}</p>
+            </div>
+            <p className="text-xs text-slate-500">This lead will be permanently deleted. This cannot be undone.</p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteSingle} disabled={isDeleting}>
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete All Confirm */}
+      <Dialog open={isDeleteAllOpen} onOpenChange={v => { if (!v) setIsDeleteAllOpen(false); }}>
+        <DialogContent className="sm:max-w-[380px]">
+          <DialogHeader>
+            <DialogTitle className="text-red-600 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" /> Delete All Fake Call Leads
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-3 space-y-3">
+            <p className="text-sm text-slate-600">
+              This will permanently delete all <strong className="text-red-600">{leads.length} leads</strong> flagged for fake calls.
+            </p>
+            <div className="p-3 bg-red-50 border border-red-100 rounded-lg">
+              <p className="text-xs text-red-700 font-semibold">⚠️ This action cannot be undone.</p>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setIsDeleteAllOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteAll} disabled={isDeleting}>
+              {isDeleting ? 'Deleting...' : `Delete All (${leads.length})`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Reassign Modal */}
       <Dialog open={isReassignModalOpen} onOpenChange={setIsReassignModalOpen}>
