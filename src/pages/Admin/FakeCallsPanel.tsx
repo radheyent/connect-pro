@@ -1,241 +1,284 @@
-import React, { useState, useEffect } from 'react';
-import { supabase, Lead, UserProfile } from '@/lib/supabase';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogDescription, 
-  DialogHeader, 
-  DialogTitle, 
-  DialogFooter 
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription
 } from '@/components/ui/dialog';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from '@/components/ui/select';
-import { AlertCircle, RefreshCcw, UserPlus, PhoneOff, Trash2, AlertTriangle } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { CheckCircle2, RefreshCcw, UserPlus, PhoneOff, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 
+// ─── What this panel does ─────────────────────────────────────────────────────
+// This is a VALIDATION GATE — not a delete gate.
+// Leads with fake call attempts appear here for admin review.
+// Admin can:
+//   1. ✅ "Not Fake"  → clear fake_call flag on call_attempts → lead exits this list safely
+//   2. 🔄 Reassign   → reset lead to Fresh + clear fake flags + assign to employee
+//   3. 🔁 Recall     → mark pending_recall = true, status = Not Connected
+// No lead is ever deleted from this panel.
+
 const FakeCallsPanel: React.FC = () => {
-  const [leads, setLeads] = useState<any[]>([]);
-  const [employees, setEmployees] = useState<UserProfile[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeLead, setActiveLead] = useState<any | null>(null);
-  const [isReassignModalOpen, setIsReassignModalOpen] = useState(false);
-  const [assigneeId, setAssigneeId] = useState('');
-  const [deleteTarget, setDeleteTarget]   = useState<any>(null);
-  const [isDeleteAllOpen, setIsDeleteAllOpen] = useState(false);
-  const [isDeleting, setIsDeleting]       = useState(false);
+  const [leads,     setLeads]     = useState<any[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [empMap,    setEmpMap]    = useState<Record<string,string>>({});
+  const [loading,   setLoading]   = useState(true);
 
-  useEffect(() => {
-    fetchFakeLeads();
-    fetchEmployees();
-  }, []);
+  // Reassign modal
+  const [activeLead,       setActiveLead]       = useState<any>(null);
+  const [isReassignOpen,   setIsReassignOpen]   = useState(false);
+  const [assigneeId,       setAssigneeId]       = useState('');
+  const [actioning,        setActioning]        = useState(false);
 
-  const fetchFakeLeads = async () => {
+  // ── Fetch ─────────────────────────────────────────────────────────────────
+  const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const { isSupabaseConfigured } = await import('@/lib/supabase');
-      if (!isSupabaseConfigured) {
-        setLeads([
-          {
-            id: '1', name: 'S. Mehra', phone: '+91 88888 77777', status: 'Flagged',
-            assigned_user: { name: 'Employee_04' },
-            call_attempts: [{ duration_seconds: 3, fake_call: true, created_at: new Date().toISOString() }],
-            last_call_date: new Date().toISOString(),
-            last_call_duration: 3
-          }
-        ] as any);
+      // Step 1: Get lead IDs that have active fake calls
+      const { data: fakeCalls, error: fcErr } = await supabase
+        .from('call_attempts')
+        .select('lead_id')
+        .eq('fake_call', true);
+      if (fcErr) throw fcErr;
+
+      const fakeLeadIds = [...new Set((fakeCalls || []).map((c: any) => c.lead_id).filter(Boolean))];
+
+      if (fakeLeadIds.length === 0) {
+        setLeads([]);
+        setLoading(false);
         return;
       }
 
-      // Step 1: Get lead IDs with fake calls
-      const { data: fakeCalls, error: fcErr } = await supabase
-        .from('call_attempts').select('lead_id').eq('fake_call', true);
-      if (fcErr) throw fcErr;
-
-      const fakeLeadIds = [...new Set((fakeCalls || []).map((c: any) => c.lead_id))];
-      if (fakeLeadIds.length === 0) { setLeads([]); return; }
-
-      // Step 2: Fetch those leads (simple select)
-      const { data: leadsData, error } = await supabase
-        .from('leads').select('*')
+      // Step 2: Fetch those leads (exclude Complete)
+      const { data: leadsData, error: lErr } = await supabase
+        .from('leads')
+        .select('*')
         .in('id', fakeLeadIds)
         .neq('status', 'Complete')
         .order('last_call_date', { ascending: false });
-      if (error) throw error;
+      if (lErr) throw lErr;
 
-      // Step 3: Enrich with employee names separately
-      const assignedIds = [...new Set((leadsData||[]).map((l:any)=>l.assigned_to).filter(Boolean))];
-      const empMap: Record<string,string> = {};
-      if (assignedIds.length > 0) {
-        const { data: emps } = await supabase.from('user_profiles').select('id,name').in('id', assignedIds);
-        (emps||[]).forEach((e:any) => { empMap[e.id] = e.name; });
-      }
+      // Step 3: Employee names
+      const { data: emps } = await supabase.from('user_profiles').select('id,name').eq('is_active', true);
+      const em: Record<string,string> = {};
+      (emps||[]).forEach((e:any) => { em[e.id] = e.name; });
+      setEmpMap(em);
+      setEmployees(emps || []);
 
+      // Enrich leads with employee name
       const enriched = (leadsData||[]).map((l:any) => ({
-        ...l, assigned_user: l.assigned_to ? { name: empMap[l.assigned_to] || 'Unknown' } : null
+        ...l,
+        assigneeName: em[l.assigned_to] || 'Unassigned',
       }));
       setLeads(enriched);
-    } catch (error: any) {
-      toast.error('Failed to fetch fake call leads');
+    } catch (e: any) {
+      toast.error('Failed to fetch: ' + e.message);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchEmployees = async () => {
-    const { isSupabaseConfigured } = await import('@/lib/supabase');
-    if (!isSupabaseConfigured) {
-      setEmployees([{ id: '1', name: 'Amit Kumar' }, { id: '2', name: 'Rajesh M.' }] as any);
-      return;
-    }
-    const { data } = await supabase.from('user_profiles').select('*').eq('is_active', true);
-    setEmployees(data || []);
-  };
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  const handleMarkForRecall = async (leadId: string) => {
+  // ── Action 1: Not Fake — clear fake_call flag ─────────────────────────────
+  // This removes the lead from this list without touching the lead record itself
+  const handleNotFake = async (lead: any) => {
+    setActioning(true);
     try {
       const { error } = await supabase
-        .from('leads')
-        .update({ 
-          pending_recall: true, 
-          status: 'Not Connected' 
-        })
-        .eq('id', leadId);
-
+        .from('call_attempts')
+        .update({ fake_call: false })
+        .eq('lead_id', lead.id);
       if (error) throw error;
-      toast.success('Lead marked for recall.');
-      fetchFakeLeads();
-    } catch (error: any) {
-      toast.error('Operation failed');
+      toast.success(`"${lead.name}" cleared — not a fake call ✅`);
+      fetchAll();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setActioning(false);
     }
   };
 
-  const handleReassignAndRecall = async () => {
+  // ── Action 2: Recall — mark pending_recall ────────────────────────────────
+  // Clears fake flag + marks for recall. Lead stays with same employee.
+  const handleRecall = async (lead: any) => {
+    setActioning(true);
+    try {
+      // Clear fake flags
+      await supabase.from('call_attempts').update({ fake_call: false }).eq('lead_id', lead.id);
+      // Mark lead for recall
+      const { error } = await supabase.from('leads')
+        .update({ pending_recall: true, status: 'Not Connected' })
+        .eq('id', lead.id);
+      if (error) throw error;
+      toast.success(`"${lead.name}" marked for recall 🔁`);
+      fetchAll();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setActioning(false);
+    }
+  };
+
+  // ── Action 3: Reassign — Fresh + clear fake + new employee ────────────────
+  const handleReassign = async () => {
     if (!activeLead || !assigneeId) return;
+    setActioning(true);
     try {
-      const { error } = await supabase
-        .from('leads')
-        .update({ 
-          assigned_to: assigneeId,
-          pending_recall: true, 
-          status: 'Not Connected' 
-        })
-        .eq('id', activeLead.id);
-
+      // 1. Clear all fake call flags for this lead
+      await supabase.from('call_attempts').update({ fake_call: false }).eq('lead_id', activeLead.id);
+      // 2. Reset lead to Fresh + new assignee
+      const { error } = await supabase.from('leads').update({
+        status:        'Fresh',
+        assigned_to:   assigneeId,
+        pending_recall: false,
+      }).eq('id', activeLead.id);
       if (error) throw error;
-      toast.success('Lead reassigned and queued for recall.');
-      setIsReassignModalOpen(false);
-      fetchFakeLeads();
-    } catch (error: any) {
-      toast.error('Reassignment failed');
+      toast.success(`"${activeLead.name}" reassigned as Fresh lead ✅`);
+      setIsReassignOpen(false);
+      setActiveLead(null);
+      setAssigneeId('');
+      fetchAll();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setActioning(false);
     }
   };
 
-  const handleDeleteSingle = async () => {
-    if (!deleteTarget) return;
-    setIsDeleting(true);
-    try {
-      const { error } = await supabase.from('leads').delete().eq('id', deleteTarget.id);
-      if (error) throw error;
-      toast.success(`"${deleteTarget.name}" deleted`);
-      setDeleteTarget(null);
-      fetchFakeLeads();
-    } catch (e: any) { toast.error(e.message); }
-    finally { setIsDeleting(false); }
-  };
-
-  const handleDeleteAll = async () => {
-    if (leads.length === 0) return;
-    setIsDeleting(true);
-    try {
-      const ids = leads.map(l => l.id);
-      const { error } = await supabase.from('leads').delete().in('id', ids);
-      if (error) throw error;
-      toast.success(`${ids.length} fake call leads deleted`);
-      setIsDeleteAllOpen(false);
-      fetchFakeLeads();
-    } catch (e: any) { toast.error(e.message); }
-    finally { setIsDeleting(false); }
-  };
-
+  // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-6">
-      <Card border-destructive>
-        <CardHeader className="bg-red-50 dark:bg-red-950/20">
-          <div className="flex items-center gap-2">
-            <PhoneOff className="h-5 w-5 text-red-500" />
-            <CardTitle>Fake Call Detection Panel</CardTitle>
-          </div>
-          <CardDescription className="flex items-center justify-between flex-wrap gap-2">
-            <span>Review leads with suspicious call durations (under 10s) that aren't completed.</span>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="bg-red-50 dark:bg-red-950/20 border-b border-red-100 dark:border-red-900">
+          <div className="flex items-start justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2">
+              <PhoneOff className="h-5 w-5 text-red-500" />
+              <div>
+                <CardTitle>Fake Call Validation Gate</CardTitle>
+                <CardDescription className="mt-0.5">
+                  Leads flagged for calls under 10s — review and decide next action.
+                  No lead is deleted from here.
+                </CardDescription>
+              </div>
+            </div>
             {leads.length > 0 && (
-              <Button variant="destructive" size="sm" className="h-7 text-xs"
-                onClick={() => setIsDeleteAllOpen(true)}>
-                <Trash2 className="h-3.5 w-3.5 mr-1" />Delete All ({leads.length})
-              </Button>
+              <Badge variant="destructive" className="text-sm px-3 py-1">
+                {leads.length} flagged
+              </Badge>
             )}
-          </CardDescription>
+          </div>
+
+          {/* Legend */}
+          <div className="flex flex-wrap gap-3 mt-3 text-xs text-slate-500">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+              <strong>Not Fake</strong> — remove from list, lead untouched
+            </span>
+            <span className="flex items-center gap-1.5">
+              <RefreshCcw className="h-3.5 w-3.5 text-blue-600" />
+              <strong>Recall</strong> — clear flag + mark pending recall
+            </span>
+            <span className="flex items-center gap-1.5">
+              <UserPlus className="h-3.5 w-3.5 text-purple-600" />
+              <strong>Reassign</strong> — reset to Fresh + new employee
+            </span>
+          </div>
         </CardHeader>
+
         <CardContent className="p-0">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Lead Name</TableHead>
+              <TableRow className="bg-slate-50 dark:bg-slate-900">
+                <TableHead>Lead</TableHead>
                 <TableHead>Phone</TableHead>
-                <TableHead>Current Assignee</TableHead>
-                <TableHead>Last Duration</TableHead>
+                <TableHead>Assigned To</TableHead>
+                <TableHead>Duration</TableHead>
                 <TableHead>Detected At</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="text-right min-w-[260px]">Admin Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-10">Searching for suspicious activity...</TableCell></TableRow>
+                <TableRow>
+                  <TableCell colSpan={6} className="py-16 text-center text-slate-400">
+                    Scanning for suspicious activity...
+                  </TableCell>
+                </TableRow>
               ) : leads.length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-10 text-muted-foreground">No fake calls detected recently.</TableCell></TableRow>
-              ) : leads.map((lead) => (
-                <TableRow key={lead.id}>
-                  <TableCell className="font-medium">{lead.name}</TableCell>
-                  <TableCell>{lead.phone}</TableCell>
-                  <TableCell>{lead.assigned_user?.name || 'Unassigned'}</TableCell>
+                <TableRow>
+                  <TableCell colSpan={6} className="py-16 text-center">
+                    <ShieldCheck className="h-10 w-10 text-green-400 mx-auto mb-2" />
+                    <p className="text-slate-400 font-medium">All clear — no fake calls detected</p>
+                  </TableCell>
+                </TableRow>
+              ) : leads.map(lead => (
+                <TableRow key={lead.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50">
+                  <TableCell className="font-semibold">{lead.name}</TableCell>
+                  <TableCell className="font-mono text-sm">{lead.phone}</TableCell>
+                  <TableCell className="text-sm italic text-slate-600 dark:text-slate-400">
+                    {lead.assigneeName}
+                  </TableCell>
                   <TableCell>
-                    <Badge variant="destructive" className="animate-pulse">
+                    <Badge variant="destructive" className="animate-pulse font-mono">
                       {lead.last_call_duration}s
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-xs">
-                    {lead.last_call_date ? format(new Date(lead.last_call_date), 'HH:mm dd/MM') : 'N/A'}
+                  <TableCell className="text-xs text-slate-400">
+                    {lead.last_call_date
+                      ? format(new Date(lead.last_call_date), 'HH:mm dd/MM/yy')
+                      : '—'}
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm" className="h-8 gap-1"
-                        onClick={() => handleMarkForRecall(lead.id)}>
-                        <RefreshCcw className="h-3.5 w-3.5" />Recall
+                    <div className="flex justify-end gap-1.5 flex-wrap">
+
+                      {/* Action 1: Not Fake */}
+                      <Button
+                        size="sm"
+                        className="h-8 gap-1 bg-green-600 hover:bg-green-700 text-white text-xs"
+                        disabled={actioning}
+                        onClick={() => handleNotFake(lead)}
+                        title="Mark as genuine — remove from this list"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Not Fake
                       </Button>
-                      <Button variant="secondary" size="sm" className="h-8 gap-1"
-                        onClick={() => { setActiveLead(lead); setIsReassignModalOpen(true); }}>
-                        <UserPlus className="h-3.5 w-3.5" />Reassign
+
+                      {/* Action 2: Recall */}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1 text-blue-600 border-blue-200 hover:bg-blue-50 text-xs"
+                        disabled={actioning}
+                        onClick={() => handleRecall(lead)}
+                        title="Clear flag + mark for recall by same employee"
+                      >
+                        <RefreshCcw className="h-3.5 w-3.5" />
+                        Recall
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:bg-red-50"
-                        onClick={() => setDeleteTarget(lead)}>
-                        <Trash2 className="h-4 w-4" />
+
+                      {/* Action 3: Reassign */}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1 text-purple-600 border-purple-200 hover:bg-purple-50 text-xs"
+                        disabled={actioning}
+                        onClick={() => {
+                          setActiveLead(lead);
+                          setAssigneeId(lead.assigned_to || '');
+                          setIsReassignOpen(true);
+                        }}
+                        title="Reset to Fresh + assign to different employee"
+                      >
+                        <UserPlus className="h-3.5 w-3.5" />
+                        Reassign
                       </Button>
+
                     </div>
                   </TableCell>
                 </TableRow>
@@ -245,80 +288,68 @@ const FakeCallsPanel: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Single Delete Confirm */}
-      <Dialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null); }}>
-        <DialogContent className="sm:max-w-[360px]">
+      {/* ── Reassign Modal ── */}
+      <Dialog open={isReassignOpen} onOpenChange={v => { if (!v) { setIsReassignOpen(false); setActiveLead(null); setAssigneeId(''); }}}>
+        <DialogContent className="sm:max-w-[420px]">
           <DialogHeader>
-            <DialogTitle className="text-red-600 flex items-center gap-2">
-              <Trash2 className="h-4 w-4" /> Delete Lead
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="h-5 w-5 text-purple-600" />
+              Reassign as Fresh Lead
             </DialogTitle>
-          </DialogHeader>
-          <div className="py-3">
-            <div className="p-3 bg-slate-50 rounded-lg border mb-3">
-              <p className="font-bold text-slate-900">{deleteTarget?.name}</p>
-              <p className="text-xs text-slate-500 font-mono">{deleteTarget?.phone}</p>
-            </div>
-            <p className="text-xs text-slate-500">This lead will be permanently deleted. This cannot be undone.</p>
-          </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleDeleteSingle} disabled={isDeleting}>
-              {isDeleting ? 'Deleting...' : 'Delete'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete All Confirm */}
-      <Dialog open={isDeleteAllOpen} onOpenChange={v => { if (!v) setIsDeleteAllOpen(false); }}>
-        <DialogContent className="sm:max-w-[380px]">
-          <DialogHeader>
-            <DialogTitle className="text-red-600 flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4" /> Delete All Fake Call Leads
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-3 space-y-3">
-            <p className="text-sm text-slate-600">
-              This will permanently delete all <strong className="text-red-600">{leads.length} leads</strong> flagged for fake calls.
-            </p>
-            <div className="p-3 bg-red-50 border border-red-100 rounded-lg">
-              <p className="text-xs text-red-700 font-semibold">⚠️ This action cannot be undone.</p>
-            </div>
-          </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setIsDeleteAllOpen(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleDeleteAll} disabled={isDeleting}>
-              {isDeleting ? 'Deleting...' : `Delete All (${leads.length})`}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Reassign Modal */}
-      <Dialog open={isReassignModalOpen} onOpenChange={setIsReassignModalOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Reassign & Recall</DialogTitle>
             <DialogDescription>
-              Assign {activeLead?.name} to a different employee for a fresh call.
+              Lead will be reset to <strong>Fresh</strong> status and all fake call flags will be cleared.
+              Choose which employee should get this lead.
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4">
-            <label className="text-sm font-medium mb-2 block">Choose New Employee</label>
-            <Select value={assigneeId} onValueChange={setAssigneeId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select employee" />
-              </SelectTrigger>
-              <SelectContent>
-                {employees.map(emp => (
-                  <SelectItem key={emp.id} value={emp.id}>{emp.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+
+          <div className="py-3 space-y-3">
+            {/* Lead info */}
+            <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+              <p className="font-bold text-slate-900 dark:text-white">{activeLead?.name}</p>
+              <p className="text-xs text-slate-500 font-mono">{activeLead?.phone}</p>
+              <p className="text-xs text-slate-400 mt-1">
+                Currently: <span className="italic">{activeLead?.assigneeName}</span>
+              </p>
+            </div>
+
+            {/* Employee select */}
+            <div>
+              <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5 block">
+                Assign To Employee
+              </label>
+              <Select value={assigneeId} onValueChange={setAssigneeId}>
+                <SelectTrigger><SelectValue placeholder="Select employee" /></SelectTrigger>
+                <SelectContent>
+                  {employees.map(emp => (
+                    <SelectItem key={emp.id} value={emp.id}>
+                      {emp.name}
+                      {emp.id === activeLead?.assigned_to && ' (current)'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* What will happen */}
+            <div className="text-xs text-slate-400 space-y-0.5 bg-purple-50 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900 rounded-lg p-3">
+              <p>✅ Lead status → <strong>Fresh</strong></p>
+              <p>✅ Fake call history → cleared (call_attempts)</p>
+              <p>✅ Pending recall → reset</p>
+              <p>✅ Lead stays in system safely</p>
+            </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsReassignModalOpen(false)}>Cancel</Button>
-            <Button onClick={handleReassignAndRecall} disabled={!assigneeId}>Reassign & Recall</Button>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setIsReassignOpen(false)} disabled={actioning}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-purple-600 hover:bg-purple-700"
+              onClick={handleReassign}
+              disabled={!assigneeId || actioning}
+            >
+              {actioning ? 'Processing...' : 'Reassign as Fresh'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
