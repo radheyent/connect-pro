@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { CheckCircle, XCircle, Trash2, Edit, Download, Plus, Settings } from 'lucide-react';
+import { CheckCircle, XCircle, Trash2, Edit, Download, Plus, Settings, TrendingUp, TrendingDown, IndianRupee } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const TABS = ['Overview', 'Pending', 'Field Expenses', 'Office Expenses', 'Ledger'] as const;
@@ -62,9 +62,10 @@ const ExpensesPage: React.FC = () => {
   const [kmRateInput, setKmRateInput] = useState('5');
 
   // Filters
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo,   setDateTo]   = useState('');
-  const [empFilter, setEmpFilter] = useState('all');
+  const [dateFrom,    setDateFrom]    = useState('');
+  const [dateTo,      setDateTo]      = useState('');
+  const [empFilter,   setEmpFilter]   = useState('all');
+  const [monthView,   setMonthView]   = useState(() => new Date().toISOString().slice(0,7)); // YYYY-MM
 
   // Modal states
   const [rejectTarget,   setRejectTarget]   = useState<any>(null);
@@ -128,15 +129,31 @@ const ExpensesPage: React.FC = () => {
 
   // ── Month summaries ────────────────────────────────────────────────────────
   const thisMonth = new Date().toISOString().slice(0, 7);
-  const summary = useMemo(() => {
-    const af = fieldExp.filter(e => e.status === 'approved' && e.expense_date?.startsWith(thisMonth));
-    const oe = officeExp.filter(e => e.expense_date?.startsWith(thisMonth));
+
+  // Generic function to compute summary for any month
+  const computeSummary = useCallback((month: string) => {
+    const af = fieldExp.filter(e => e.status === 'approved' && e.expense_date?.startsWith(month));
+    const oe = officeExp.filter(e => e.expense_date?.startsWith(month));
     const fieldConv = af.reduce((s,e) => s + (Number(e.conveyance_amount)||0), 0);
     const credit    = af.reduce((s,e) => s + (Number(e.credit_total)||0), 0);
     const km        = af.reduce((s,e) => s + (Number(e.kilometres)||0), 0);
     const office    = oe.reduce((s,e) => s + (Number(e.amount)||0), 0);
-    return { fieldConv, credit, km, office, net: fieldConv + office - credit };
-  }, [fieldExp, officeExp, thisMonth]);
+    const totalExpense = fieldConv + office;
+    const profit = credit - totalExpense;
+    return { fieldConv, credit, km, office, net: totalExpense - credit, totalExpense, profit };
+  }, [fieldExp, officeExp]);
+
+  const summary      = useMemo(() => computeSummary(thisMonth), [computeSummary, thisMonth]);
+  const monthSummary = useMemo(() => computeSummary(monthView), [computeSummary, monthView]);
+
+  // All unique months from data
+  const allMonths = useMemo(() => {
+    const months = new Set([
+      ...fieldExp.map(e => e.expense_date?.slice(0,7)).filter(Boolean),
+      ...officeExp.map(e => e.expense_date?.slice(0,7)).filter(Boolean),
+    ]);
+    return [...months].sort().reverse();
+  }, [fieldExp, officeExp]);
 
   // ── Filtered field expenses ────────────────────────────────────────────────
   const filteredField = useMemo(() => fieldExp.filter(e => {
@@ -394,46 +411,62 @@ const ExpensesPage: React.FC = () => {
       {/* ── OVERVIEW ── */}
       {!loading && tab === 'Overview' && (
         <div className="space-y-4">
+          {/* This Month Summary + Profit */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
-              { label: 'Field Conveyance (Month)', val: `₹${summary.fieldConv.toFixed(0)}`, color: 'text-orange-600' },
-              { label: 'Office Expenses (Month)',  val: `₹${summary.office.toFixed(0)}`,    color: 'text-red-600' },
-              { label: 'Customer Credit (Month)',  val: `₹${summary.credit.toFixed(0)}`,    color: 'text-green-600' },
-              { label: 'Net Company Expense',      val: `₹${summary.net.toFixed(0)}`,       color: 'text-blue-600' },
+              { label: 'Field Conveyance',  val: `₹${summary.fieldConv.toFixed(0)}`, color: 'text-orange-600' },
+              { label: 'Office Expenses',   val: `₹${summary.office.toFixed(0)}`,    color: 'text-red-600' },
+              { label: 'Credit Collected',  val: `₹${summary.credit.toFixed(0)}`,    color: 'text-green-600' },
+              { label: 'Total KM (month)',  val: `${summary.km.toFixed(1)} km`,       color: 'text-blue-600' },
             ].map(({ label, val, color }) => (
               <Card key={label}>
                 <CardContent className="p-4">
                   <p className={`text-2xl font-black ${color}`}>{val}</p>
-                  <p className="text-xs text-slate-500 mt-1">{label}</p>
+                  <p className="text-xs text-slate-500 mt-1">{label} — This Month</p>
                 </CardContent>
               </Card>
             ))}
           </div>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Settings className="h-4 w-4" /> KM Rate Setting
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex items-center gap-3">
-              <Input
-                type="number" min="1" step="0.5"
-                className="w-28 h-8 text-sm"
-                value={kmRateInput}
-                onChange={e => setKmRateInput(e.target.value)}
-              />
-              <span className="text-sm text-slate-500">₹ per km</span>
-              <Button size="sm" variant="outline" onClick={saveKmRate}>Save</Button>
-              <span className="text-xs text-slate-400">Currently ₹{kmRate}/km</span>
-            </CardContent>
-          </Card>
+          {/* PROFIT CHIP */}
+          <div className={`rounded-2xl p-5 border-2 flex items-center justify-between gap-4 flex-wrap ${
+            summary.profit >= 0
+              ? 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800'
+              : 'bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800'
+          }`}>
+            <div className="flex items-center gap-3">
+              {summary.profit >= 0
+                ? <TrendingUp className="h-8 w-8 text-green-600 shrink-0" />
+                : <TrendingDown className="h-8 w-8 text-red-500 shrink-0" />}
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">This Month — Net Profit</p>
+                <p className="text-xs text-slate-400 mt-0.5">Credit Collected − (Field + Office Expense)</p>
+                <p className="text-xs text-slate-400">₹{summary.credit.toFixed(0)} − ₹{summary.totalExpense.toFixed(0)}</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className={`text-4xl font-black ${summary.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                {summary.profit >= 0 ? '+' : ''}₹{Math.abs(summary.profit).toFixed(0)}
+              </p>
+              <p className={`text-xs font-semibold mt-0.5 ${summary.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                {summary.profit >= 0 ? '▲ Profitable' : '▼ Loss'}
+              </p>
+            </div>
+          </div>
 
+          {/* KM Rate + Pending */}
           <div className="grid grid-cols-2 gap-3">
             <Card>
-              <CardContent className="p-4">
-                <p className="text-3xl font-black text-blue-600">{summary.km.toFixed(1)} km</p>
-                <p className="text-xs text-slate-500 mt-1">Total KM this month (approved)</p>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Settings className="h-4 w-4" /> KM Rate
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex items-center gap-2">
+                <Input type="number" min="1" step="0.5" className="w-24 h-8 text-sm"
+                  value={kmRateInput} onChange={e => setKmRateInput(e.target.value)} />
+                <span className="text-sm text-slate-500">₹/km</span>
+                <Button size="sm" variant="outline" onClick={saveKmRate}>Save</Button>
               </CardContent>
             </Card>
             <Card>
@@ -443,6 +476,70 @@ const ExpensesPage: React.FC = () => {
               </CardContent>
             </Card>
           </div>
+
+          {/* ── MONTHLY HISTORY ── */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <CardTitle className="text-base">Monthly Breakdown</CardTitle>
+                <div className="flex items-center gap-2">
+                  <input type="month" value={monthView}
+                    onChange={e => setMonthView(e.target.value)}
+                    className="h-8 px-2 text-xs border border-slate-200 rounded-lg dark:bg-slate-800 dark:border-slate-600 dark:text-white" />
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {/* Selected month summary */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { label: 'Field Conveyance', val: `₹${monthSummary.fieldConv.toFixed(0)}`, color: 'text-orange-600' },
+                  { label: 'Office Expenses',  val: `₹${monthSummary.office.toFixed(0)}`,    color: 'text-red-600' },
+                  { label: 'Credit Collected', val: `₹${monthSummary.credit.toFixed(0)}`,    color: 'text-green-600' },
+                  { label: 'Net Profit',        val: `${monthSummary.profit >= 0 ? '+' : ''}₹${monthSummary.profit.toFixed(0)}`,
+                    color: monthSummary.profit >= 0 ? 'text-green-600' : 'text-red-500' },
+                ].map(({ label, val, color }) => (
+                  <div key={label} className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3 border border-slate-100 dark:border-slate-700">
+                    <p className={`text-xl font-black ${color}`}>{val}</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">{label}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* All months quick table */}
+              {allMonths.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs mt-2">
+                    <thead>
+                      <tr className="border-b border-slate-100 dark:border-slate-700">
+                        {['Month','Field ₹','Office ₹','Credit ₹','Profit ₹'].map(h => (
+                          <th key={h} className="text-left px-2 py-1.5 text-[10px] font-bold uppercase text-slate-400">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                      {allMonths.map(m => {
+                        const s = computeSummary(m);
+                        return (
+                          <tr key={m}
+                            className={`hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer ${monthView === m ? 'bg-blue-50 dark:bg-blue-950/20' : ''}`}
+                            onClick={() => setMonthView(m)}>
+                            <td className="px-2 py-2 font-semibold">{m}</td>
+                            <td className="px-2 py-2 text-orange-600">₹{s.fieldConv.toFixed(0)}</td>
+                            <td className="px-2 py-2 text-red-500">₹{s.office.toFixed(0)}</td>
+                            <td className="px-2 py-2 text-green-600">₹{s.credit.toFixed(0)}</td>
+                            <td className={`px-2 py-2 font-black ${s.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                              {s.profit >= 0 ? '+' : ''}₹{s.profit.toFixed(0)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       )}
 
