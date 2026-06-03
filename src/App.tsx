@@ -13,11 +13,31 @@ import BackupPage from './pages/Admin/BackupPage';
 import DashboardLayout from './components/layout/DashboardLayout';
 import { Toaster } from './components/ui/sonner';
 import { TooltipProvider } from './components/ui/tooltip';
+import EmployeeLeadsPage from './pages/Employee/EmployeeLeadsPage';
+import AnnouncementsPage from './pages/AnnouncementsPage';
+import ExpensesPage from './pages/Admin/ExpensesPage';
+import MyConveyancePage from './pages/FieldBoy/MyConveyancePage';
 
-const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) => {
+// ── ProtectedRoute — stable, does NOT re-render on token refresh ─────────────
+const ProtectedRoute = React.memo(({
+  children, allowedRoles
+}: {
+  children: React.ReactNode;
+  allowedRoles?: string[];
+}) => {
   const { user, profile, loading } = useAuth();
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-slate-400 text-sm">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!user) return <Navigate to="/login" replace />;
 
   if (allowedRoles && profile && !allowedRoles.includes(profile.role)) {
@@ -25,30 +45,36 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
   }
 
   return <>{children}</>;
-};
+});
+ProtectedRoute.displayName = 'ProtectedRoute';
 
-const RoleRedirect = () => {
+// ── RoleRedirect — stable memo ────────────────────────────────────────────────
+const RoleRedirect = React.memo(() => {
   const { profile, loading } = useAuth();
-  if (loading) return <div>Loading...</div>;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-slate-400 text-sm">Redirecting...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!profile) return <Navigate to="/login" replace />;
 
   switch (profile.role) {
-    case 'admin':
-      return <Navigate to="/admin" replace />;
-    case 'field_boy':
-      return <Navigate to="/field-boy" replace />;
-    case 'employee':
-      return <Navigate to="/employee" replace />;
-    default:
-      return <Navigate to="/login" replace />;
+    case 'admin':     return <Navigate to="/admin"      replace />;
+    case 'field_boy': return <Navigate to="/field-boy"  replace />;
+    case 'employee':  return <Navigate to="/employee"   replace />;
+    default:          return <Navigate to="/login"      replace />;
   }
-};
+});
+RoleRedirect.displayName = 'RoleRedirect';
 
-import EmployeeLeadsPage from './pages/Employee/EmployeeLeadsPage';
-import AnnouncementsPage from './pages/AnnouncementsPage';
-import ExpensesPage from './pages/Admin/ExpensesPage';
-import MyConveyancePage from './pages/FieldBoy/MyConveyancePage';
-
+// ── App ───────────────────────────────────────────────────────────────────────
 function App() {
   return (
     <AuthProvider>
@@ -56,10 +82,9 @@ function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
-            
-            <Route path="/" element={<RoleRedirect />} />
+            <Route path="/"      element={<RoleRedirect />} />
 
-            {/* Common Shared Routes */}
+            {/* Shared routes (all roles) */}
             <Route path="/" element={
               <ProtectedRoute allowedRoles={['admin', 'employee', 'field_boy']}>
                 <DashboardLayout />
@@ -68,39 +93,39 @@ function App() {
               <Route path="announcements" element={<AnnouncementsPage />} />
             </Route>
 
-            {/* Admin Routes */}
+            {/* Admin routes */}
             <Route path="/admin" element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <DashboardLayout />
               </ProtectedRoute>
             }>
-              <Route index element={<AdminDashboard />} />
-              <Route path="employees" element={<EmployeeManagement />} />
-              <Route path="leads" element={<LeadManagement />} />
-              <Route path="fake-calls" element={<FakeCallsPanel />} />
-              <Route path="reports" element={<ReportsPage />} />
-              <Route path="backup" element={<BackupPage />} />
-              <Route path="expenses" element={<ExpensesPage />} />
+              <Route index                  element={<AdminDashboard />} />
+              <Route path="employees"       element={<EmployeeManagement />} />
+              <Route path="leads"           element={<LeadManagement />} />
+              <Route path="fake-calls"      element={<FakeCallsPanel />} />
+              <Route path="reports"         element={<ReportsPage />} />
+              <Route path="backup"          element={<BackupPage />} />
+              <Route path="expenses"        element={<ExpensesPage />} />
             </Route>
 
-            {/* Employee Routes */}
+            {/* Employee routes */}
             <Route path="/employee" element={
               <ProtectedRoute allowedRoles={['employee']}>
                 <DashboardLayout />
               </ProtectedRoute>
             }>
-              <Route index element={<EmployeeDashboard />} />
-              <Route path="leads" element={<EmployeeLeadsPage />} />
+              <Route index          element={<EmployeeDashboard />} />
+              <Route path="leads"   element={<EmployeeLeadsPage />} />
             </Route>
 
-            {/* Field Boy Routes */}
+            {/* Field Boy routes */}
             <Route path="/field-boy" element={
               <ProtectedRoute allowedRoles={['field_boy']}>
                 <DashboardLayout />
               </ProtectedRoute>
             }>
-              <Route index element={<FieldBoyDashboard />} />
-              <Route path="conveyance" element={<MyConveyancePage />} />
+              <Route index               element={<FieldBoyDashboard />} />
+              <Route path="conveyance"   element={<MyConveyancePage />} />
             </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />

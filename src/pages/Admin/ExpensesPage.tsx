@@ -9,10 +9,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { CheckCircle, XCircle, Trash2, Edit, Download, Plus, Settings, TrendingUp, TrendingDown, IndianRupee } from 'lucide-react';
+import { CheckCircle, XCircle, Trash2, Edit, Download, Plus, Settings, TrendingUp, TrendingDown, IndianRupee, Users, ShieldAlert } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-const TABS = ['Overview', 'Pending', 'Field Expenses', 'Office Expenses', 'Ledger'] as const;
+const TABS = ['Overview', 'Pending', 'Field Expenses', 'Office Expenses', 'Ledger', 'Budget'] as const;
 type TabType = typeof TABS[number];
 
 const OFFICE_CATS = [
@@ -47,6 +47,14 @@ const StatusBadge = ({ s }: { s: string }) => {
   );
 };
 
+// ── Budget types ──────────────────────────────────────────────────────────────
+interface BudgetEntry {
+  id?: string;
+  user_id: string;
+  monthly_limit: number;
+  note: string;
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 const ExpensesPage: React.FC = () => {
   const { user } = useAuth();
@@ -61,11 +69,18 @@ const ExpensesPage: React.FC = () => {
   const [kmRate,    setKmRate]    = useState(5);
   const [kmRateInput, setKmRateInput] = useState('5');
 
+  // Budget
+  const [budgets,    setBudgets]    = useState<Record<string, BudgetEntry>>({});
+  const [budgetForm, setBudgetForm] = useState<Record<string, string>>({});
+  const [budgetNotes, setBudgetNotes] = useState<Record<string, string>>({});
+  const [savingBudget, setSavingBudget] = useState<string | null>(null);
+  const [employees, setEmployees]   = useState<any[]>([]);
+
   // Filters
   const [dateFrom,    setDateFrom]    = useState('');
   const [dateTo,      setDateTo]      = useState('');
   const [empFilter,   setEmpFilter]   = useState('all');
-  const [monthView,   setMonthView]   = useState(() => new Date().toISOString().slice(0,7)); // YYYY-MM
+  const [monthView,   setMonthView]   = useState(() => new Date().toISOString().slice(0,7));
 
   // Modal states
   const [rejectTarget,   setRejectTarget]   = useState<any>(null);
@@ -77,30 +92,23 @@ const ExpensesPage: React.FC = () => {
   const [editOfficeId,   setEditOfficeId]   = useState<string|null>(null);
   const [saving,         setSaving]         = useState(false);
 
-  // Employees list for dropdown
-  const employees = useMemo(() =>
-    Object.entries(empMap).map(([id, name]) => ({ id, name }))
-      .sort((a,b) => a.name.localeCompare(b.name)),
-    [empMap]
-  );
-
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      // Parallel fetch — no joins on auth.users
-      const [feRes, oeRes, upRes, setRes] = await Promise.all([
+      const [feRes, oeRes, upRes, setRes, budgetRes] = await Promise.all([
         supabase.from('field_expenses').select('*').order('expense_date', { ascending: false }),
         supabase.from('office_expenses').select('*').order('expense_date', { ascending: false }),
-        supabase.from('user_profiles').select('id,name'),
+        supabase.from('user_profiles').select('id,name').eq('is_active', true),
         supabase.from('app_settings').select('value').eq('key','km_rate_per_km').single(),
+        // Try to fetch budgets — table may not exist yet, silently handle
+        supabase.from('expense_budgets').select('*').throwOnError(false),
       ]);
 
-      // Build employee map
       const em: Record<string,string> = {};
       (upRes.data||[]).forEach((u:any) => { em[u.id] = u.name; });
       setEmpMap(em);
+      setEmployees(upRes.data || []);
 
-      // Build lead map for field expenses that have lead_id
       const leadIds = [...new Set((feRes.data||[]).map((e:any) => e.lead_id).filter(Boolean))];
       let lm: Record<string,string> = {};
       if (leadIds.length > 0) {
@@ -115,6 +123,21 @@ const ExpensesPage: React.FC = () => {
       const rate = parseFloat(setRes.data?.value || '5') || 5;
       setKmRate(rate);
       setKmRateInput(String(rate));
+
+      // Load budgets
+      if (budgetRes.data) {
+        const bm: Record<string, BudgetEntry> = {};
+        const bf: Record<string, string> = {};
+        const bn: Record<string, string> = {};
+        (budgetRes.data||[]).forEach((b:any) => {
+          bm[b.user_id] = b;
+          bf[b.user_id] = String(b.monthly_limit);
+          bn[b.user_id] = b.note || '';
+        });
+        setBudgets(bm);
+        setBudgetForm(bf);
+        setBudgetNotes(bn);
+      }
     } catch (e: any) {
       toast.error('Failed to load: ' + e.message);
     } finally {
@@ -130,7 +153,6 @@ const ExpensesPage: React.FC = () => {
   // ── Month summaries ────────────────────────────────────────────────────────
   const thisMonth = new Date().toISOString().slice(0, 7);
 
-  // Generic function to compute summary for any month
   const computeSummary = useCallback((month: string) => {
     const af = fieldExp.filter(e => e.status === 'approved' && e.expense_date?.startsWith(month));
     const oe = officeExp.filter(e => e.expense_date?.startsWith(month));
@@ -146,7 +168,6 @@ const ExpensesPage: React.FC = () => {
   const summary      = useMemo(() => computeSummary(thisMonth), [computeSummary, thisMonth]);
   const monthSummary = useMemo(() => computeSummary(monthView), [computeSummary, monthView]);
 
-  // All unique months from data
   const allMonths = useMemo(() => {
     const months = new Set([
       ...fieldExp.map(e => e.expense_date?.slice(0,7)).filter(Boolean),
@@ -155,7 +176,6 @@ const ExpensesPage: React.FC = () => {
     return [...months].sort().reverse();
   }, [fieldExp, officeExp]);
 
-  // ── Filtered field expenses ────────────────────────────────────────────────
   const filteredField = useMemo(() => fieldExp.filter(e => {
     if (empFilter !== 'all' && e.field_boy_id !== empFilter) return false;
     if (dateFrom && e.expense_date < dateFrom) return false;
@@ -163,7 +183,6 @@ const ExpensesPage: React.FC = () => {
     return true;
   }), [fieldExp, empFilter, dateFrom, dateTo]);
 
-  // ── Ledger ─────────────────────────────────────────────────────────────────
   const ledger = useMemo(() => {
     const rows = [
       ...fieldExp
@@ -196,6 +215,50 @@ const ExpensesPage: React.FC = () => {
     });
   }, [fieldExp, officeExp, empMap, leadMap]);
 
+  // ── Per-employee budget usage this month ───────────────────────────────────
+  const empBudgetUsage = useMemo(() => {
+    const usage: Record<string, number> = {};
+    fieldExp
+      .filter(e => e.status !== 'rejected' && e.expense_date?.startsWith(thisMonth))
+      .forEach(e => {
+        const id = e.field_boy_id;
+        usage[id] = (usage[id] || 0) + (Number(e.conveyance_amount) || 0);
+      });
+    return usage;
+  }, [fieldExp, thisMonth]);
+
+  // ── Save budget for employee ───────────────────────────────────────────────
+  const saveBudget = async (empId: string) => {
+    const limit = parseFloat(budgetForm[empId] || '0');
+    if (!limit || limit < 0) { toast.error('Enter a valid budget amount'); return; }
+    setSavingBudget(empId);
+    try {
+      const payload = {
+        user_id: empId,
+        monthly_limit: limit,
+        note: budgetNotes[empId] || '',
+        updated_by: user!.id,
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await supabase.from('expense_budgets').upsert(payload, { onConflict: 'user_id' });
+      if (error) {
+        // Table might not exist — create it via a stored proc or show SQL hint
+        if (error.code === '42P01') {
+          toast.error('Budget table not found. Run the SQL migration first.', { duration: 6000 });
+        } else {
+          throw error;
+        }
+        return;
+      }
+      setBudgets(prev => ({ ...prev, [empId]: { ...payload } }));
+      toast.success(`Budget set for ${empMap[empId] || 'employee'}`);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSavingBudget(null);
+    }
+  };
+
   // ── Approve ────────────────────────────────────────────────────────────────
   const handleApprove = async (id: string) => {
     try {
@@ -210,7 +273,6 @@ const ExpensesPage: React.FC = () => {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  // ── Reject ─────────────────────────────────────────────────────────────────
   const handleReject = async () => {
     if (!rejectTarget || !rejectComment.trim()) { toast.error('Enter a reason'); return; }
     try {
@@ -226,7 +288,6 @@ const ExpensesPage: React.FC = () => {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  // ── Delete ─────────────────────────────────────────────────────────────────
   const handleDelete = async () => {
     if (!deleteTarget) return;
     try {
@@ -238,7 +299,6 @@ const ExpensesPage: React.FC = () => {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  // ── Save Office Expense ────────────────────────────────────────────────────
   const saveOffice = async () => {
     if (!officeForm.amount || parseFloat(officeForm.amount) <= 0) { toast.error('Amount required'); return; }
     if (!officeForm.description.trim()) { toast.error('Description required'); return; }
@@ -267,7 +327,6 @@ const ExpensesPage: React.FC = () => {
     finally { setSaving(false); }
   };
 
-  // ── Save Field Edit ────────────────────────────────────────────────────────
   const saveFieldEdit = async () => {
     if (!editFieldItem) return;
     setSaving(true);
@@ -290,7 +349,6 @@ const ExpensesPage: React.FC = () => {
     finally { setSaving(false); }
   };
 
-  // ── KM Rate ────────────────────────────────────────────────────────────────
   const saveKmRate = async () => {
     const r = parseFloat(kmRateInput);
     if (!r || r <= 0) { toast.error('Enter a valid rate'); return; }
@@ -303,7 +361,6 @@ const ExpensesPage: React.FC = () => {
     toast.success(`Rate set to ₹${r}/km`);
   };
 
-  // ── Excel Export ───────────────────────────────────────────────────────────
   const handleExport = () => {
     const wb = XLSX.utils.book_new();
     const fe = fieldExp.map(e => ({
@@ -331,51 +388,62 @@ const ExpensesPage: React.FC = () => {
     toast.success('Excel downloaded');
   };
 
-  // ── FieldExpRow (reusable) ─────────────────────────────────────────────────
-  const FieldRow = ({ exp, showActions = true }: { exp: any; showActions?: boolean }) => (
-    <div className="p-4 flex items-start gap-3">
-      <div className="flex-1 min-w-0 space-y-1">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-semibold text-sm">{empMap[exp.field_boy_id] || '—'}</span>
-          <StatusBadge s={exp.status} />
-          {exp.closure_type && (
-            <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded capitalize">{exp.closure_type}</span>
+  // ── FieldExpRow ────────────────────────────────────────────────────────────
+  const FieldRow = ({ exp, showActions = true }: { exp: any; showActions?: boolean }) => {
+    const budget = budgets[exp.field_boy_id];
+    const used   = empBudgetUsage[exp.field_boy_id] || 0;
+    const overBudget = budget && used > budget.monthly_limit;
+
+    return (
+      <div className="p-4 flex items-start gap-3">
+        <div className="flex-1 min-w-0 space-y-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-sm">{empMap[exp.field_boy_id] || '—'}</span>
+            <StatusBadge s={exp.status} />
+            {exp.closure_type && (
+              <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded capitalize">{exp.closure_type}</span>
+            )}
+            {overBudget && (
+              <span className="text-[10px] bg-red-100 text-red-700 border border-red-200 px-1.5 py-0.5 rounded font-bold">
+                ⚠️ Over Budget
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-slate-600">{leadMap[exp.lead_id] || exp.description || 'Ad-hoc expense'}</p>
+          <div className="flex gap-3 flex-wrap text-xs">
+            <span className="text-slate-500">{exp.expense_date}</span>
+            <span className="text-blue-600 font-medium">{exp.kilometres} km</span>
+            <span className="text-orange-600 font-medium">₹{exp.conveyance_amount}</span>
+            {Number(exp.credit_total) > 0 && <span className="text-green-600 font-medium">Credit ₹{exp.credit_total}</span>}
+            {exp.notes && <span className="text-slate-400 italic">{exp.notes}</span>}
+          </div>
+          {exp.admin_comment && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-1.5 mt-1">
+              💬 {exp.admin_comment}
+            </p>
           )}
         </div>
-        <p className="text-sm text-slate-600">{leadMap[exp.lead_id] || exp.description || 'Ad-hoc expense'}</p>
-        <div className="flex gap-3 flex-wrap text-xs">
-          <span className="text-slate-500">{exp.expense_date}</span>
-          <span className="text-blue-600 font-medium">{exp.kilometres} km</span>
-          <span className="text-orange-600 font-medium">₹{exp.conveyance_amount}</span>
-          {Number(exp.credit_total) > 0 && <span className="text-green-600 font-medium">Credit ₹{exp.credit_total}</span>}
-          {exp.notes && <span className="text-slate-400 italic">{exp.notes}</span>}
-        </div>
-        {exp.admin_comment && (
-          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-1.5 mt-1">
-            💬 {exp.admin_comment}
-          </p>
+        {showActions && (
+          <div className="flex gap-1 shrink-0">
+            {exp.status === 'pending' && (
+              <>
+                <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={() => handleApprove(exp.id)}>✅</Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs text-red-600 border-red-200" onClick={() => { setRejectTarget(exp); setRejectComment(''); }}>❌</Button>
+              </>
+            )}
+            <Button variant="ghost" size="icon" className="h-7 w-7"
+              onClick={() => setEditFieldItem({ ...exp })}>
+              <Edit className="h-3.5 w-3.5 text-slate-500" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400"
+              onClick={() => setDeleteTarget({ id: exp.id, table: 'field_expenses', name: empMap[exp.field_boy_id] || 'expense' })}>
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         )}
       </div>
-      {showActions && (
-        <div className="flex gap-1 shrink-0">
-          {exp.status === 'pending' && (
-            <>
-              <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={() => handleApprove(exp.id)}>✅</Button>
-              <Button size="sm" variant="outline" className="h-7 text-xs text-red-600 border-red-200" onClick={() => { setRejectTarget(exp); setRejectComment(''); }}>❌</Button>
-            </>
-          )}
-          <Button variant="ghost" size="icon" className="h-7 w-7"
-            onClick={() => setEditFieldItem({ ...exp })}>
-            <Edit className="h-3.5 w-3.5 text-slate-500" />
-          </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400"
-            onClick={() => setDeleteTarget({ id: exp.id, table: 'field_expenses', name: empMap[exp.field_boy_id] || 'expense' })}>
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      )}
-    </div>
-  );
+    );
+  };
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -411,7 +479,6 @@ const ExpensesPage: React.FC = () => {
       {/* ── OVERVIEW ── */}
       {!loading && tab === 'Overview' && (
         <div className="space-y-4">
-          {/* This Month Summary + Profit */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
               { label: 'Field Conveyance',  val: `₹${summary.fieldConv.toFixed(0)}`, color: 'text-orange-600' },
@@ -428,7 +495,6 @@ const ExpensesPage: React.FC = () => {
             ))}
           </div>
 
-          {/* PROFIT CHIP */}
           <div className={`rounded-2xl p-5 border-2 flex items-center justify-between gap-4 flex-wrap ${
             summary.profit >= 0
               ? 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800'
@@ -454,7 +520,6 @@ const ExpensesPage: React.FC = () => {
             </div>
           </div>
 
-          {/* KM Rate + Pending */}
           <div className="grid grid-cols-2 gap-3">
             <Card>
               <CardHeader className="pb-2">
@@ -477,20 +542,16 @@ const ExpensesPage: React.FC = () => {
             </Card>
           </div>
 
-          {/* ── MONTHLY HISTORY ── */}
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <CardTitle className="text-base">Monthly Breakdown</CardTitle>
-                <div className="flex items-center gap-2">
-                  <input type="month" value={monthView}
-                    onChange={e => setMonthView(e.target.value)}
-                    className="h-8 px-2 text-xs border border-slate-200 rounded-lg dark:bg-slate-800 dark:border-slate-600 dark:text-white" />
-                </div>
+                <input type="month" value={monthView}
+                  onChange={e => setMonthView(e.target.value)}
+                  className="h-8 px-2 text-xs border border-slate-200 rounded-lg dark:bg-slate-800 dark:border-slate-600 dark:text-white" />
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {/* Selected month summary */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
                   { label: 'Field Conveyance', val: `₹${monthSummary.fieldConv.toFixed(0)}`, color: 'text-orange-600' },
@@ -506,7 +567,6 @@ const ExpensesPage: React.FC = () => {
                 ))}
               </div>
 
-              {/* All months quick table */}
               {allMonths.length > 0 && (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs mt-2">
@@ -669,6 +729,132 @@ const ExpensesPage: React.FC = () => {
               }
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* ── BUDGET MANAGEMENT ── */}
+      {!loading && tab === 'Budget' && (
+        <div className="space-y-4">
+          {/* SQL reminder banner */}
+          <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 dark:bg-amber-950/20 dark:border-amber-800 rounded-xl text-xs text-amber-800 dark:text-amber-200">
+            <ShieldAlert className="h-4 w-4 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold mb-1">Database Setup Required</p>
+              <p>Run this SQL in Supabase to enable Budget Management:</p>
+              <pre className="mt-2 p-2 bg-amber-100 dark:bg-amber-950/50 rounded text-[10px] overflow-x-auto whitespace-pre-wrap">{`CREATE TABLE IF NOT EXISTS public.expense_budgets (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid REFERENCES public.user_profiles(id) ON DELETE CASCADE,
+  monthly_limit numeric(10,2) NOT NULL DEFAULT 0,
+  note text,
+  updated_by uuid,
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE(user_id)
+);
+ALTER TABLE public.expense_budgets ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Admin full access" ON public.expense_budgets FOR ALL TO authenticated USING (true);`}</pre>
+            </div>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Users className="h-5 w-5 text-blue-500" />
+                Employee Monthly Expense Budgets
+              </CardTitle>
+              <p className="text-xs text-slate-500 mt-1">
+                Set per-employee monthly limits. Employees will be blocked from submitting expenses beyond their budget.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {employees.length === 0 ? (
+                <p className="text-slate-400 text-sm py-4 text-center">No employees found</p>
+              ) : (
+                employees.map(emp => {
+                  const budget = budgets[emp.id];
+                  const used   = empBudgetUsage[emp.id] || 0;
+                  const limit  = budget?.monthly_limit || 0;
+                  const pct    = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+                  const overBudget = limit > 0 && used > limit;
+
+                  return (
+                    <div key={emp.id} className={cn(
+                      "p-4 rounded-xl border space-y-3",
+                      overBudget
+                        ? "bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-800"
+                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700"
+                    )}>
+                      {/* Employee header */}
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-bold">
+                            {emp.name.split(' ').map((n:string) => n[0]).join('').toUpperCase().slice(0,2)}
+                          </div>
+                          <div>
+                            <p className="font-semibold text-sm">{emp.name}</p>
+                            <p className="text-[10px] text-slate-400 capitalize">{emp.role?.replace('_',' ')}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className={cn("text-sm font-bold", overBudget ? "text-red-600" : "text-slate-700 dark:text-slate-300")}>
+                            ₹{used.toFixed(0)} used
+                          </p>
+                          {limit > 0 && (
+                            <p className="text-[10px] text-slate-400">of ₹{limit.toFixed(0)} limit</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Progress bar */}
+                      {limit > 0 && (
+                        <div className="space-y-1">
+                          <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                            <div
+                              className={cn("h-full rounded-full transition-all", overBudget ? "bg-red-500" : pct > 80 ? "bg-amber-500" : "bg-green-500")}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <p className={cn("text-[10px] font-medium", overBudget ? "text-red-600" : "text-slate-400")}>
+                            {overBudget ? `⚠️ Over budget by ₹${(used - limit).toFixed(0)}` : `${pct.toFixed(0)}% used`}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Budget form */}
+                      <div className="flex gap-2 flex-wrap items-end">
+                        <div className="flex-1 min-w-[120px]">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Monthly Limit ₹</label>
+                          <Input
+                            type="number" min="0" step="100"
+                            placeholder="e.g. 5000"
+                            className="h-9 text-sm"
+                            value={budgetForm[emp.id] || ''}
+                            onChange={e => setBudgetForm(prev => ({ ...prev, [emp.id]: e.target.value }))}
+                          />
+                        </div>
+                        <div className="flex-1 min-w-[120px]">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Note</label>
+                          <Input
+                            placeholder="Optional note"
+                            className="h-9 text-sm"
+                            value={budgetNotes[emp.id] || ''}
+                            onChange={e => setBudgetNotes(prev => ({ ...prev, [emp.id]: e.target.value }))}
+                          />
+                        </div>
+                        <Button
+                          size="sm"
+                          className="h-9 shrink-0"
+                          onClick={() => saveBudget(emp.id)}
+                          disabled={savingBudget === emp.id}
+                        >
+                          {savingBudget === emp.id ? 'Saving...' : budget ? 'Update' : 'Set Budget'}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </CardContent>
+          </Card>
         </div>
       )}
 

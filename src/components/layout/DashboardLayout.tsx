@@ -11,16 +11,54 @@ import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 
+// ── Page title map — every route gets its own title ────────────────────────
+const PAGE_TITLES: Record<string, string> = {
+  '/admin':                'Dashboard',
+  '/admin/employees':      'Employee Management',
+  '/admin/leads':          'Lead Management',
+  '/admin/fake-calls':     'Fake Calls',
+  '/admin/reports':        'Reports',
+  '/admin/backup':         'Backup & Reset',
+  '/admin/expenses':       'Expenses',
+  '/employee':             'My Dashboard',
+  '/employee/leads':       'My Leads',
+  '/field-boy':            'Field Closure Desk',
+  '/field-boy/conveyance': 'My Conveyance',
+  '/announcements':        'Announcements',
+};
+
+const getPageTitle = (pathname: string): string => {
+  // Exact match first
+  if (PAGE_TITLES[pathname]) return PAGE_TITLES[pathname];
+  // Prefix match for nested routes
+  const sorted = Object.keys(PAGE_TITLES).sort((a, b) => b.length - a.length);
+  for (const key of sorted) {
+    if (pathname.startsWith(key + '/')) return PAGE_TITLES[key];
+  }
+  return 'Dashboard';
+};
+
 const DashboardLayout: React.FC = () => {
   const [showActivity, setShowActivity] = React.useState(false);
   const [isMobileOpen, setIsMobileOpen] = React.useState(false);
   const [isDarkMode, setIsDarkMode]     = React.useState(() => 
-    document.documentElement.classList.contains('dark')
+    typeof window !== 'undefined' && (
+      localStorage.getItem('cp-dark') === '1' ||
+      document.documentElement.classList.contains('dark')
+    )
   );
   const { profile, signOut } = useAuth();
   const location  = useLocation();
   const navigate  = useNavigate();
   const activityRef = React.useRef<HTMLDivElement>(null);
+
+  // Compute correct page title on every navigation
+  const pageTitle = React.useMemo(() => getPageTitle(location.pathname), [location.pathname]);
+
+  // Update browser tab title
+  React.useEffect(() => {
+    document.title = `${pageTitle} — Connect Pro`;
+  }, [pageTitle]);
 
   const toggleDarkMode = () => {
     const next = !isDarkMode;
@@ -29,14 +67,14 @@ const DashboardLayout: React.FC = () => {
     localStorage.setItem('cp-dark', next ? '1' : '0');
   };
 
-  // Persist dark mode across refresh
+  // Apply saved dark mode on first mount only
   React.useEffect(() => {
     const saved = localStorage.getItem('cp-dark');
-    if (saved === '1') {
-      setIsDarkMode(true);
+    if (saved === '1' && !document.documentElement.classList.contains('dark')) {
       document.documentElement.classList.add('dark');
+      setIsDarkMode(true);
     }
-  }, []);
+  }, []); // empty dep array = runs once
 
   // Close activity dropdown on outside click
   React.useEffect(() => {
@@ -49,22 +87,22 @@ const DashboardLayout: React.FC = () => {
     return () => document.removeEventListener('mousedown', handler);
   }, [showActivity]);
 
-  const navItems = [
-    { name: 'Dashboard',     path: `/${profile?.role}`,   icon: LayoutDashboard, roles: ['admin','employee','field_boy'] },
+  const navItems = React.useMemo(() => [
+    { name: 'Dashboard',     path: `/${profile?.role === 'field_boy' ? 'field-boy' : profile?.role}`, icon: LayoutDashboard, roles: ['admin','employee','field_boy'] },
     { name: 'Employees',     path: '/admin/employees',    icon: Users,           roles: ['admin'] },
     { name: 'All Leads',     path: '/admin/leads',        icon: Share2,          roles: ['admin'] },
     { name: 'Fake Calls',    path: '/admin/fake-calls',   icon: PhoneMissed,     roles: ['admin'] },
     { name: 'Reports',       path: '/admin/reports',      icon: BarChart3,       roles: ['admin'] },
+    { name: 'Expenses',      path: '/admin/expenses',     icon: Wallet,          roles: ['admin'] },
     { name: 'Backup',        path: '/admin/backup',       icon: Database,        roles: ['admin'] },
     { name: 'My Leads',      path: '/employee/leads',     icon: Users,           roles: ['employee'] },
     { name: 'Announcements', path: '/announcements',      icon: Bell,            roles: ['admin','employee','field_boy'] },
-    { name: 'Expenses',       path: '/admin/expenses',    icon: Wallet,          roles: ['admin'] },
-    { name: 'My Conveyance',  path: '/field-boy/conveyance', icon: Car,          roles: ['field_boy'] },
-  ].filter(item => item.roles.includes(profile?.role || ''));
+    { name: 'My Conveyance', path: '/field-boy/conveyance', icon: Car,           roles: ['field_boy'] },
+  ].filter(item => item.roles.includes(profile?.role || '')), [profile?.role]);
 
   const handleSignOut = async () => { await signOut(); navigate('/login'); };
 
-  const SidebarContent = ({ onNavClick }: { onNavClick?: () => void } = {}) => (
+  const SidebarContent = React.useCallback(({ onNavClick }: { onNavClick?: () => void } = {}) => (
     <div className="flex flex-col h-full bg-slate-900 text-white">
       <div className="p-6 flex items-center gap-3 border-b border-slate-800">
         <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center font-bold text-lg text-white">C+</div>
@@ -76,8 +114,6 @@ const DashboardLayout: React.FC = () => {
         </p>
         {navItems.map(item => {
           const Icon = item.icon;
-          // Exact match for Dashboard (role root paths like /admin, /employee)
-          // startsWith only for non-root paths to avoid Dashboard always active
           const isDashboard = item.name === 'Dashboard';
           const isActive = isDashboard
             ? location.pathname === item.path
@@ -112,7 +148,7 @@ const DashboardLayout: React.FC = () => {
         </div>
       </div>
     </div>
-  );
+  ), [navItems, location.pathname, profile, handleSignOut]);
 
   return (
     <div className={cn(
@@ -147,16 +183,16 @@ const DashboardLayout: React.FC = () => {
               </SheetContent>
             </Sheet>
 
+            {/* ── FIXED: Shows correct page title per route ── */}
             <h1 className="text-sm sm:text-lg font-bold truncate dark:text-white">
-              {navItems.find(i => location.pathname === i.path || 
-                (i.path !== '/' && location.pathname.startsWith(i.path)))?.name || 'Dashboard'}
+              {pageTitle}
             </h1>
             <span className="hidden sm:inline-flex px-2 py-0.5 bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 text-[10px] font-bold rounded uppercase shrink-0">
               Live
             </span>
           </div>
 
-          {/* Right — always visible, compact on mobile */}
+          {/* Right */}
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             {/* Dark mode toggle */}
             <button onClick={toggleDarkMode}
@@ -170,10 +206,10 @@ const DashboardLayout: React.FC = () => {
                 : <Moon className="h-4 w-4 sm:h-5 sm:w-5" />}
             </button>
 
-            {/* PWA install — hide on smallest screens */}
-            <div className="hidden sm:block"><PWAInstallButton /></div>
+            {/* PWA install */}
+            <PWAInstallButton />
 
-            {/* Notification Bell — ALWAYS visible including mobile */}
+            {/* Notification Bell */}
             <div className="relative" ref={activityRef}>
               <button
                 onClick={() => setShowActivity(v => !v)}
@@ -187,11 +223,9 @@ const DashboardLayout: React.FC = () => {
                 <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-white dark:border-slate-900 animate-pulse" />
               </button>
 
-              {/* Activity dropdown */}
               {showActivity && (
                 <div className={cn(
                   "absolute top-11 w-80 rounded-2xl shadow-2xl z-50 overflow-hidden border",
-                  // On mobile: center or right align, avoid overflow
                   "right-0",
                   "bg-white border-slate-200",
                   "dark:bg-slate-900 dark:border-slate-700"

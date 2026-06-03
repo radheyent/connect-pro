@@ -2,11 +2,10 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import confetti from 'canvas-confetti';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { X, Star, Zap, Trophy, Megaphone } from 'lucide-react';
-import { toast } from 'sonner';
+import { X, Star, Zap, Trophy } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ── Types ────────────────────────────────────────────────────────────────────
 interface ActivityItem {
   id: string;
   type: 'sale' | 'announcement' | 'call';
@@ -20,7 +19,7 @@ interface CelebrationData {
   leadName: string;
 }
 
-// ─── Confetti burst helper ────────────────────────────────────────────────────
+// ── Confetti burst helper ────────────────────────────────────────────────────
 const fireCelebration = () => {
   const fire = (ratio: number, opts: confetti.Options) =>
     confetti({ origin: { y: 0.6 }, particleCount: Math.floor(200 * ratio), ...opts });
@@ -31,13 +30,13 @@ const fireCelebration = () => {
   fire(0.10, { spread: 120, startVelocity: 45, colors: ['#facc15', '#f97316'] });
 };
 
-// ─── Celebration Overlay ──────────────────────────────────────────────────────
+// ── Celebration Overlay ──────────────────────────────────────────────────────
 const CelebrationOverlay: React.FC<{ data: CelebrationData; onClose: () => void }> = ({ data, onClose }) => {
   useEffect(() => {
     fireCelebration();
     const t = setTimeout(onClose, 6000);
     return () => clearTimeout(t);
-  }, []);
+  }, [onClose]);
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/20 backdrop-blur-sm"
@@ -48,37 +47,26 @@ const CelebrationOverlay: React.FC<{ data: CelebrationData; onClose: () => void 
           className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition-colors">
           <X className="h-5 w-5" />
         </button>
-
-        {/* Animated stars */}
         <div className="flex justify-center gap-1 mb-3">
           {[0,1,2,3,4].map(i => (
             <Star key={i} className="h-5 w-5 text-yellow-400 fill-yellow-400"
               style={{ animation: `starPop 0.4s ${i * 0.08}s ease both` }} />
           ))}
         </div>
-
         <div className="text-6xl mb-3" style={{ animation: 'pulse 1s infinite' }}>🏆</div>
-
         <h2 className="text-3xl font-black text-slate-900 tracking-tight mb-1">SALE CLOSED!</h2>
-
         <p className="text-blue-600 font-bold text-xl mb-1">{data.employeeName}</p>
         <p className="text-slate-500 text-sm mb-4">
-          just closed&nbsp;
-          <span className="font-semibold text-slate-800">"{data.leadName}"</span>
+          just closed&nbsp;<span className="font-semibold text-slate-800">"{data.leadName}"</span>
         </p>
-
         <div className="flex items-center justify-center gap-2 bg-gradient-to-r from-green-50 to-emerald-50 rounded-2xl py-3 px-4 border border-green-100">
           <Zap className="h-4 w-4 text-green-500 shrink-0" />
           <span className="text-green-700 text-sm font-semibold">Keep the momentum going! 🚀</span>
         </div>
-
-        {/* Progress bar auto-close */}
         <div className="mt-4 h-1 bg-slate-100 rounded-full overflow-hidden">
-          <div className="h-full bg-blue-400 rounded-full"
-            style={{ animation: 'shrink 6s linear forwards' }} />
+          <div className="h-full bg-blue-400 rounded-full" style={{ animation: 'shrink 6s linear forwards' }} />
         </div>
       </div>
-
       <style>{`
         @keyframes bounceIn {
           0%   { transform: scale(0.3) translateY(60px); opacity: 0; }
@@ -105,70 +93,83 @@ const CelebrationOverlay: React.FC<{ data: CelebrationData; onClose: () => void 
   );
 };
 
-// ─── Recent Activity Panel ────────────────────────────────────────────────────
+// ── Recent Activity Panel ─────────────────────────────────────────────────────
+// Cached to avoid re-fetching on every bell open
+let activityCache: ActivityItem[] = [];
+let activityCacheTime = 0;
+const CACHE_TTL = 30_000; // 30 seconds
+
 export const RecentActivityPanel: React.FC = () => {
   const { user, profile } = useAuth();
-  const [items, setItems] = useState<ActivityItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [items, setItems]   = useState<ActivityItem[]>(activityCache);
+  const [loading, setLoading] = useState(activityCache.length === 0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     if (!user || !profile) { setLoading(false); return; }
-    setLoading(true);
+
+    // Use cache if fresh
+    const now = Date.now();
+    if (activityCache.length > 0 && (now - activityCacheTime) < CACHE_TTL) {
+      setItems(activityCache);
+      setLoading(false);
+      return;
+    }
 
     const load = async () => {
+      if (!mountedRef.current) return;
       try {
         const activityItems: ActivityItem[] = [];
 
-        // TYPE 1: Last 4 completed sales
-        const { data: sales } = await supabase
-          .from('leads')
-          .select('id, name, assigned_to, completed_date, last_call_date')
-          .eq('status', 'Complete')
-          .order('last_call_date', { ascending: false })
-          .limit(4);
+        // Sales, announcements, and my last call — 3 parallel queries
+        const [salesRes, annRes, callRes] = await Promise.all([
+          supabase.from('leads').select('id,name,assigned_to,completed_date,last_call_date')
+            .eq('status', 'Complete').order('last_call_date', { ascending: false }).limit(4),
+          supabase.from('announcements').select('id,title,created_at')
+            .order('created_at', { ascending: false }).limit(3),
+          supabase.from('call_attempts').select('id,lead_id,created_at,duration_seconds')
+            .eq('user_id', user.id).order('created_at', { ascending: false }).limit(1),
+        ]);
 
-        if (sales && sales.length > 0) {
-          const ids = [...new Set(sales.map((s: any) => s.assigned_to).filter(Boolean))];
+        // Enrich sales with employee names (single batch query)
+        if (salesRes.data?.length) {
+          const ids = [...new Set(salesRes.data.map((s: any) => s.assigned_to).filter(Boolean))];
           const empMap: Record<string, string> = {};
           if (ids.length) {
             const { data: emps } = await supabase.from('user_profiles').select('id,name').in('id', ids);
             (emps || []).forEach((e: any) => { empMap[e.id] = e.name; });
           }
-          sales.forEach((s: any) => {
+          salesRes.data.forEach((s: any) => {
             const empName = empMap[s.assigned_to] || 'Someone';
-            const isMine = s.assigned_to === user.id;
+            const isMine  = s.assigned_to === user.id;
             activityItems.push({
               id: `s-${s.id}`, type: 'sale',
               title: isMine
                 ? `🏆 You closed a sale! Well Done ${profile.name}!`
-                : `🏆 ${empName} closed a sale! Well Done ${empName}!`,
+                : `🏆 ${empName} closed a sale!`,
               subtitle: `Customer: ${s.name}`,
-              time: s.completed_date || s.last_call_date || s.id,
+              time: s.completed_date || s.last_call_date || '',
             });
           });
         }
 
-        // TYPE 2: Last 4 announcements
-        const { data: anns } = await supabase
-          .from('announcements').select('id, title, created_at')
-          .order('created_at', { ascending: false }).limit(4);
-        (anns || []).forEach((a: any) => {
+        (annRes.data || []).forEach((a: any) => {
           activityItems.push({
             id: `a-${a.id}`, type: 'announcement',
             title: `📢 Admin made an announcement`,
-            subtitle: a.title,
-            time: a.created_at,
+            subtitle: a.title, time: a.created_at,
           });
         });
 
-        // TYPE 3: Your most recent call (always 1, always shown)
-        const { data: myCall } = await supabase
-          .from('call_attempts').select('id, lead_id, created_at, duration_seconds')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false }).limit(1);
-        if (myCall && myCall.length > 0) {
-          const c = myCall[0];
-          const { data: lead } = await supabase.from('leads').select('name, phone').eq('id', c.lead_id).single();
+        // Last call
+        if (callRes.data?.length) {
+          const c = callRes.data[0];
+          const { data: lead } = await supabase.from('leads').select('name,phone').eq('id', c.lead_id).single();
           if (lead) {
             activityItems.push({
               id: `c-${c.id}`, type: 'call',
@@ -179,37 +180,35 @@ export const RecentActivityPanel: React.FC = () => {
           }
         }
 
-        // Sort by time, keep 5 (last call always in because it has its own slot)
         const sorted = activityItems
           .filter(i => i.time)
           .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
           .slice(0, 5);
 
-        setItems(sorted);
+        activityCache     = sorted;
+        activityCacheTime = Date.now();
+
+        if (mountedRef.current) { setItems(sorted); setLoading(false); }
       } catch (e) {
-        console.error('Activity:', e);
-      } finally {
-        setLoading(false);
+        console.error('Activity panel error:', e);
+        if (mountedRef.current) setLoading(false);
       }
     };
 
+    setLoading(true);
     load();
 
-    // Single combined realtime channel + 60s poll (saves battery/memory)
-    const uid = user.id;
-    const ch = supabase.channel(`ra-${uid}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leads' },
-        (p) => { if (p.new?.status === 'Complete') load(); })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'announcements' }, load)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_attempts' }, load)
+    // Realtime — invalidate cache on new events (no poll to save battery)
+    const ch = supabase.channel(`ra-panel-${user.id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leads' }, (p) => {
+        if (p.new?.status === 'Complete') { activityCacheTime = 0; load(); }
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'announcements' }, () => { activityCacheTime = 0; load(); })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_attempts' }, () => { activityCacheTime = 0; load(); })
       .subscribe();
-    const poll = setInterval(load, 60000);
 
-    return () => {
-      supabase.removeChannel(ch);
-      clearInterval(poll);
-    };
-  }, [user?.id, profile?.id]);
+    return () => { supabase.removeChannel(ch); };
+  }, [user?.id, profile?.id]); // eslint-disable-line
 
   if (loading) return (
     <div className="space-y-2 p-1">
@@ -223,7 +222,6 @@ export const RecentActivityPanel: React.FC = () => {
     <div className="text-center py-8">
       <Trophy className="h-8 w-8 text-slate-300 mx-auto mb-2" />
       <p className="text-slate-400 text-sm">No recent activity yet</p>
-      <p className="text-slate-300 text-xs mt-1">Start making calls to see activity here</p>
     </div>
   );
 
@@ -231,13 +229,13 @@ export const RecentActivityPanel: React.FC = () => {
     <div className="space-y-2 max-h-80 overflow-y-auto">
       {items.map(item => (
         <div key={item.id} className={`flex items-start gap-3 p-3 rounded-xl border ${
-          item.type === 'sale' ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-100'
+          item.type === 'sale'         ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-100'
           : item.type === 'announcement' ? 'bg-gradient-to-r from-blue-50 to-sky-50 border-blue-100'
           : 'bg-gradient-to-r from-slate-50 to-gray-50 border-slate-100'
         }`}>
           <div className="flex-1 min-w-0">
             <p className={`text-xs font-bold ${
-              item.type === 'sale' ? 'text-green-800'
+              item.type === 'sale'         ? 'text-green-800'
               : item.type === 'announcement' ? 'text-blue-800'
               : 'text-slate-700'
             }`}>{item.title}</p>
@@ -252,90 +250,43 @@ export const RecentActivityPanel: React.FC = () => {
   );
 };
 
-// ─── Global Celebration Listener ─────────────────────────────────────────────
+// ── Global Celebration Listener ──────────────────────────────────────────────
+// Only runs for non-admin users. Uses realtime only (no polling) to save battery.
 const CelebrationSystem: React.FC = () => {
   const { profile } = useAuth();
   const [celebration, setCelebration] = useState<CelebrationData | null>(null);
   const seenIds = useRef<Set<string>>(new Set());
-  const lastChecked = useRef<string>(new Date().toISOString());
 
-  const checkNewSales = useCallback(async () => {
-    try {
-      const { data } = await supabase
-        .from('leads')
-        .select('id, name, assigned_to, completed_date')
-        .eq('status', 'Complete')
-        .gte('last_call_date', lastChecked.current)
-        .order('completed_date', { ascending: false })
-        .limit(5);
-
-      lastChecked.current = new Date().toISOString();
-
-      if (!data || data.length === 0) return;
-
-      for (const lead of data) {
-        if (seenIds.current.has(lead.id)) continue;
-        seenIds.current.add(lead.id);
-
-        // Get employee name
-        let empName = 'Someone';
-        if (lead.assigned_to) {
-          const { data: emp } = await supabase
-            .from('user_profiles').select('name').eq('id', lead.assigned_to).single();
-          if (emp) empName = emp.name;
-        }
-
-        setCelebration({ uid: lead.id, employeeName: empName, leadName: lead.name });
-        break; // one at a time
-      }
-    } catch (e) {
-      console.error('Sale check error:', e);
-    }
-  }, []);
+  const handleClose = useCallback(() => setCelebration(null), []);
 
   useEffect(() => {
     if (!profile || profile.role === 'admin') return;
 
-    // Realtime — primary method
     const channel = supabase.channel(`celebrate-${profile.id}`)
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'leads' },
         async (payload) => {
           const newLead = payload.new as any;
           const oldLead = payload.old as any;
-          // Only trigger when status CHANGES to Complete
-          if (newLead?.status === 'Complete' && oldLead?.status !== 'Complete') {
-            if (seenIds.current.has(newLead.id)) return;
-            seenIds.current.add(newLead.id);
+          if (newLead?.status !== 'Complete' || oldLead?.status === 'Complete') return;
+          if (seenIds.current.has(newLead.id)) return;
+          seenIds.current.add(newLead.id);
 
-            let empName = 'Someone';
-            if (newLead.assigned_to) {
-              const { data } = await supabase
-                .from('user_profiles').select('name').eq('id', newLead.assigned_to).single();
-              if (data) empName = data.name;
-            }
-            setCelebration({ uid: newLead.id, employeeName: empName, leadName: newLead.name });
+          let empName = 'Someone';
+          if (newLead.assigned_to) {
+            const { data } = await supabase
+              .from('user_profiles').select('name').eq('id', newLead.assigned_to).single();
+            if (data) empName = data.name;
           }
+          setCelebration({ uid: newLead.id, employeeName: empName, leadName: newLead.name });
         }
       ).subscribe();
 
-    // Polling fallback every 20s (in case realtime misses)
-    const poll = setInterval(checkNewSales, 60000);
-
-    return () => {
-      supabase.removeChannel(channel);
-      clearInterval(poll);
-    };
-  }, [profile, checkNewSales]);
+    return () => { supabase.removeChannel(channel); };
+  }, [profile?.id]); // eslint-disable-line
 
   if (!celebration) return null;
-
-  return (
-    <CelebrationOverlay
-      data={celebration}
-      onClose={() => setCelebration(null)}
-    />
-  );
+  return <CelebrationOverlay data={celebration} onClose={handleClose} />;
 };
 
 export default CelebrationSystem;

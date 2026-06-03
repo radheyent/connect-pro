@@ -85,8 +85,7 @@ const FakeCallsPanel: React.FC = () => {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // ── Action 1: Not Fake — clear fake_call flag ─────────────────────────────
-  // This removes the lead from this list without touching the lead record itself
+  // ── Action 1: Not Fake ────────────────────────────────────────────────────
   const handleNotFake = async (lead: any) => {
     setActioning(true);
     try {
@@ -104,14 +103,11 @@ const FakeCallsPanel: React.FC = () => {
     }
   };
 
-  // ── Action 2: Recall — mark pending_recall ────────────────────────────────
-  // Clears fake flag + marks for recall. Lead stays with same employee.
+  // ── Action 2: Recall ──────────────────────────────────────────────────────
   const handleRecall = async (lead: any) => {
     setActioning(true);
     try {
-      // Clear fake flags
       await supabase.from('call_attempts').update({ fake_call: false }).eq('lead_id', lead.id);
-      // Mark lead for recall
       const { error } = await supabase.from('leads')
         .update({ pending_recall: true, status: 'Not Connected' })
         .eq('id', lead.id);
@@ -125,14 +121,12 @@ const FakeCallsPanel: React.FC = () => {
     }
   };
 
-  // ── Action 3: Reassign — Fresh + clear fake + new employee ────────────────
+  // ── Action 3: Reassign ────────────────────────────────────────────────────
   const handleReassign = async () => {
     if (!activeLead || !assigneeId) return;
     setActioning(true);
     try {
-      // 1. Clear all fake call flags for this lead
       await supabase.from('call_attempts').update({ fake_call: false }).eq('lead_id', activeLead.id);
-      // 2. Reset lead to Fresh + new assignee
       const { error } = await supabase.from('leads').update({
         status:        'Fresh',
         assigned_to:   assigneeId,
@@ -192,99 +186,153 @@ const FakeCallsPanel: React.FC = () => {
         </CardHeader>
 
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-slate-50 dark:bg-slate-900">
-                <TableHead>Lead</TableHead>
-                <TableHead>Phone</TableHead>
-                <TableHead>Assigned To</TableHead>
-                <TableHead>Duration</TableHead>
-                <TableHead>Detected At</TableHead>
-                <TableHead className="text-right min-w-[260px]">Admin Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-16 text-center text-slate-400">
-                    Scanning for suspicious activity...
-                  </TableCell>
+          {/* ── Desktop Table ── */}
+          <div className="hidden md:block">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-50 dark:bg-slate-900">
+                  <TableHead>Lead</TableHead>
+                  <TableHead>Phone</TableHead>
+                  <TableHead>Assigned To</TableHead>
+                  <TableHead>Duration</TableHead>
+                  <TableHead>Detected At</TableHead>
+                  <TableHead className="text-right min-w-[280px]">Admin Action</TableHead>
                 </TableRow>
-              ) : leads.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-16 text-center">
-                    <ShieldCheck className="h-10 w-10 text-green-400 mx-auto mb-2" />
-                    <p className="text-slate-400 font-medium">All clear — no fake calls detected</p>
-                  </TableCell>
-                </TableRow>
-              ) : leads.map(lead => (
-                <TableRow key={lead.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50">
-                  <TableCell className="font-semibold">{lead.name}</TableCell>
-                  <TableCell className="font-mono text-sm">{lead.phone}</TableCell>
-                  <TableCell className="text-sm italic text-slate-600 dark:text-slate-400">
-                    {lead.assigneeName}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="destructive" className="animate-pulse font-mono">
-                      {lead.last_call_duration}s
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-xs text-slate-400">
-                    {lead.last_call_date
-                      ? format(new Date(lead.last_call_date), 'HH:mm dd/MM/yy')
-                      : '—'}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1.5 flex-wrap">
+              </TableHeader>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-16 text-center text-slate-400">
+                      Scanning for suspicious activity...
+                    </TableCell>
+                  </TableRow>
+                ) : leads.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-16 text-center">
+                      <ShieldCheck className="h-10 w-10 text-green-400 mx-auto mb-2" />
+                      <p className="text-slate-400 font-medium">All clear — no fake calls detected</p>
+                    </TableCell>
+                  </TableRow>
+                ) : leads.map(lead => (
+                  <TableRow key={lead.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50">
+                    <TableCell className="font-semibold">{lead.name}</TableCell>
+                    <TableCell className="font-mono text-sm">{lead.phone}</TableCell>
+                    <TableCell className="text-sm italic text-slate-600 dark:text-slate-400">
+                      {lead.assigneeName}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="destructive" className="animate-pulse font-mono">
+                        {lead.last_call_duration}s
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs text-slate-400">
+                      {lead.last_call_date
+                        ? format(new Date(lead.last_call_date), 'HH:mm dd/MM/yy')
+                        : '—'}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1.5 flex-wrap">
+                        <Button size="sm" className="h-8 gap-1 bg-green-600 hover:bg-green-700 text-white text-xs"
+                          disabled={actioning} onClick={() => handleNotFake(lead)}
+                          title="Mark as genuine — remove from this list">
+                          <CheckCircle2 className="h-3.5 w-3.5" />Not Fake
+                        </Button>
+                        <Button variant="outline" size="sm"
+                          className="h-8 gap-1 text-blue-600 border-blue-200 hover:bg-blue-50 text-xs"
+                          disabled={actioning} onClick={() => handleRecall(lead)}
+                          title="Clear flag + mark for recall by same employee">
+                          <RefreshCcw className="h-3.5 w-3.5" />Recall
+                        </Button>
+                        <Button variant="outline" size="sm"
+                          className="h-8 gap-1 text-purple-600 border-purple-200 hover:bg-purple-50 text-xs"
+                          disabled={actioning}
+                          onClick={() => { setActiveLead(lead); setAssigneeId(lead.assigned_to || ''); setIsReassignOpen(true); }}
+                          title="Reset to Fresh + assign to different employee">
+                          <UserPlus className="h-3.5 w-3.5" />Reassign
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
 
-                      {/* Action 1: Not Fake */}
+          {/* ── Mobile Card View — FIXED layout ── */}
+          <div className="md:hidden">
+            {loading ? (
+              <div className="py-16 text-center text-slate-400">
+                Scanning for suspicious activity...
+              </div>
+            ) : leads.length === 0 ? (
+              <div className="py-16 text-center">
+                <ShieldCheck className="h-10 w-10 text-green-400 mx-auto mb-2" />
+                <p className="text-slate-400 font-medium">All clear — no fake calls detected</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {leads.map(lead => (
+                  <div key={lead.id} className="p-4 space-y-3">
+                    {/* Lead Info */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-900 dark:text-white">{lead.name}</p>
+                        <p className="text-xs font-mono text-slate-500">{lead.phone}</p>
+                        <p className="text-xs text-slate-400 mt-0.5 italic">{lead.assigneeName}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <Badge variant="destructive" className="font-mono animate-pulse">
+                          {lead.last_call_duration}s
+                        </Badge>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          {lead.last_call_date
+                            ? format(new Date(lead.last_call_date), 'HH:mm dd/MM/yy')
+                            : '—'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons — full width grid on mobile */}
+                    <div className="grid grid-cols-3 gap-2">
                       <Button
                         size="sm"
-                        className="h-8 gap-1 bg-green-600 hover:bg-green-700 text-white text-xs"
+                        className="h-9 gap-1 bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold w-full justify-center"
                         disabled={actioning}
                         onClick={() => handleNotFake(lead)}
-                        title="Mark as genuine — remove from this list"
                       >
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        Not Fake
+                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                        <span>Not Fake</span>
                       </Button>
-
-                      {/* Action 2: Recall */}
                       <Button
                         variant="outline"
                         size="sm"
-                        className="h-8 gap-1 text-blue-600 border-blue-200 hover:bg-blue-50 text-xs"
+                        className="h-9 gap-1 text-blue-600 border-blue-200 hover:bg-blue-50 text-[11px] font-bold w-full justify-center dark:border-blue-800 dark:text-blue-400"
                         disabled={actioning}
                         onClick={() => handleRecall(lead)}
-                        title="Clear flag + mark for recall by same employee"
                       >
-                        <RefreshCcw className="h-3.5 w-3.5" />
-                        Recall
+                        <RefreshCcw className="h-3.5 w-3.5 shrink-0" />
+                        <span>Recall</span>
                       </Button>
-
-                      {/* Action 3: Reassign */}
                       <Button
                         variant="outline"
                         size="sm"
-                        className="h-8 gap-1 text-purple-600 border-purple-200 hover:bg-purple-50 text-xs"
+                        className="h-9 gap-1 text-purple-600 border-purple-200 hover:bg-purple-50 text-[11px] font-bold w-full justify-center dark:border-purple-800 dark:text-purple-400"
                         disabled={actioning}
                         onClick={() => {
                           setActiveLead(lead);
                           setAssigneeId(lead.assigned_to || '');
                           setIsReassignOpen(true);
                         }}
-                        title="Reset to Fresh + assign to different employee"
                       >
-                        <UserPlus className="h-3.5 w-3.5" />
-                        Reassign
+                        <UserPlus className="h-3.5 w-3.5 shrink-0" />
+                        <span>Reassign</span>
                       </Button>
-
                     </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
 

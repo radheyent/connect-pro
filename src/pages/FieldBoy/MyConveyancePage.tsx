@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { MapPin, IndianRupee, Plus, ChevronDown, ChevronUp, Calculator, Car } from 'lucide-react';
+import { MapPin, IndianRupee, Plus, ChevronDown, ChevronUp, Calculator, Car, AlertTriangle } from 'lucide-react';
 
 const EMPTY_FORM = {
   expense_date:      new Date().toISOString().split('T')[0],
@@ -46,6 +46,10 @@ const MyConveyancePage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [expandedId,   setExpandedId]   = useState<string | null>(null);
 
+  // Budget state
+  const [monthlyBudget, setMonthlyBudget] = useState<number | null>(null);
+  const [budgetNote,    setBudgetNote]    = useState('');
+
   const [form,       setForm]       = useState(EMPTY_FORM);
   const [credit,     setCredit]     = useState(EMPTY_CREDIT);
   const [showCredit, setShowCredit] = useState(false);
@@ -60,19 +64,19 @@ const MyConveyancePage: React.FC = () => {
     if (!user) return;
     setLoading(true);
     try {
-      // Parallel — no joins on auth.users
-      const [expRes, setRes] = await Promise.all([
+      const [expRes, setRes, budgetRes] = await Promise.all([
         supabase.from('field_expenses')
           .select('*')
           .eq('field_boy_id', user.id)
           .order('expense_date', { ascending: false }),
         supabase.from('app_settings').select('value').eq('key', 'km_rate_per_km').single(),
+        // Try fetching budget — handle gracefully if table doesn't exist
+        supabase.from('expense_budgets').select('monthly_limit,note').eq('user_id', user.id).maybeSingle(),
       ]);
 
       const data = expRes.data || [];
       setExpenses(data);
 
-      // Fetch lead names for expenses that have lead_id
       const leadIds = [...new Set(data.map((e: any) => e.lead_id).filter(Boolean))];
       if (leadIds.length > 0) {
         const { data: leadsData } = await supabase.from('leads').select('id,name').in('id', leadIds);
@@ -82,6 +86,11 @@ const MyConveyancePage: React.FC = () => {
       }
 
       setKmRate(parseFloat(setRes.data?.value || '5') || 5);
+
+      if (budgetRes.data) {
+        setMonthlyBudget(budgetRes.data.monthly_limit || null);
+        setBudgetNote(budgetRes.data.note || '');
+      }
     } catch (e: any) {
       toast.error('Failed to load: ' + e.message);
     } finally {
@@ -91,16 +100,23 @@ const MyConveyancePage: React.FC = () => {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // ── Summaries (approved this month only) ────────────────────────────────
+  // ── Summaries (approved + pending this month) ─────────────────────────────
   const thisMonth = new Date().toISOString().slice(0, 7);
-  const { totalKm, totalConv, totalCred } = useMemo(() => {
+  const { totalKm, totalConv, totalCred, usedBudget } = useMemo(() => {
     const approved = expenses.filter(e => e.status === 'approved' && e.expense_date?.startsWith(thisMonth));
+    // Budget usage includes pending + approved (not rejected)
+    const forBudget = expenses.filter(e => e.status !== 'rejected' && e.expense_date?.startsWith(thisMonth));
     return {
-      totalKm:   approved.reduce((s, e) => s + (Number(e.kilometres) || 0), 0),
-      totalConv: approved.reduce((s, e) => s + (Number(e.conveyance_amount) || 0), 0),
-      totalCred: approved.reduce((s, e) => s + (Number(e.credit_total) || 0), 0),
+      totalKm:    approved.reduce((s, e) => s + (Number(e.kilometres) || 0), 0),
+      totalConv:  approved.reduce((s, e) => s + (Number(e.conveyance_amount) || 0), 0),
+      totalCred:  approved.reduce((s, e) => s + (Number(e.credit_total) || 0), 0),
+      usedBudget: forBudget.reduce((s, e) => s + (Number(e.conveyance_amount) || 0), 0),
     };
   }, [expenses, thisMonth]);
+
+  const budgetPct       = monthlyBudget ? Math.min(100, (usedBudget / monthlyBudget) * 100) : 0;
+  const overBudget      = monthlyBudget !== null && usedBudget >= monthlyBudget;
+  const remainingBudget = monthlyBudget !== null ? monthlyBudget - usedBudget : null;
 
   const filtered = useMemo(() =>
     statusFilter === 'all' ? expenses : expenses.filter(e => e.status === statusFilter),
@@ -116,7 +132,6 @@ const MyConveyancePage: React.FC = () => {
     }));
   };
 
-  // ── Reset & close ─────────────────────────────────────────────────────────
   const resetAndClose = () => {
     setForm(EMPTY_FORM);
     setCredit(EMPTY_CREDIT);
@@ -124,12 +139,22 @@ const MyConveyancePage: React.FC = () => {
     setIsAddOpen(false);
   };
 
-  // ── Submit ────────────────────────────────────────────────────────────────
+  // ── Submit with budget check ───────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!form.description.trim())              { toast.error('Description is required'); return; }
     if (!form.kilometres || parseFloat(form.kilometres) <= 0) { toast.error('Kilometres must be greater than 0'); return; }
     if (!form.conveyance_amount || parseFloat(form.conveyance_amount) < 0) { toast.error('Conveyance amount required'); return; }
     if (showCredit && creditTotal === 0)        { toast.error('Enter at least one credit amount'); return; }
+
+    // ── Budget validation ──────────────────────────────────────────────────
+    const newAmount = parseFloat(form.conveyance_amount) || 0;
+    if (monthlyBudget !== null && (usedBudget + newAmount) > monthlyBudget) {
+      toast.error(
+        `Expense limit exceeded. Your monthly budget is ₹${monthlyBudget.toFixed(0)} and you have ₹${Math.max(0, remainingBudget!).toFixed(0)} remaining. Please contact Admin.`,
+        { duration: 7000 }
+      );
+      return;
+    }
 
     setSaving(true);
     try {
@@ -164,6 +189,10 @@ const MyConveyancePage: React.FC = () => {
     }
   };
 
+  // Preview — would this exceed budget?
+  const previewAmount   = parseFloat(form.conveyance_amount) || 0;
+  const wouldExceed     = monthlyBudget !== null && (usedBudget + previewAmount) > monthlyBudget;
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
@@ -173,10 +202,49 @@ const MyConveyancePage: React.FC = () => {
           <h1 className="text-2xl font-bold dark:text-white">My Conveyance</h1>
           <p className="text-xs text-slate-500 mt-0.5">This month — approved entries only in summary</p>
         </div>
-        <Button onClick={() => { setForm(EMPTY_FORM); setCredit(EMPTY_CREDIT); setShowCredit(false); setIsAddOpen(true); }}>
+        <Button
+          onClick={() => { setForm(EMPTY_FORM); setCredit(EMPTY_CREDIT); setShowCredit(false); setIsAddOpen(true); }}
+          disabled={overBudget}
+          title={overBudget ? 'Monthly budget limit reached. Contact Admin.' : 'Add new expense'}
+        >
           <Plus className="h-4 w-4 mr-1.5" />Add Expense
         </Button>
       </div>
+
+      {/* Budget alert banner */}
+      {monthlyBudget !== null && (
+        <div className={`rounded-xl p-4 border flex items-start gap-3 ${
+          overBudget
+            ? 'bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800'
+            : budgetPct > 80
+              ? 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800'
+              : 'bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800'
+        }`}>
+          <div className="flex-1 space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <IndianRupee className={`h-4 w-4 shrink-0 ${overBudget ? 'text-red-600' : 'text-blue-600'}`} />
+                <span className="text-sm font-bold dark:text-white">Monthly Budget</span>
+                {budgetNote && <span className="text-xs text-slate-400 italic">— {budgetNote}</span>}
+              </div>
+              <span className={`text-sm font-black ${overBudget ? 'text-red-600' : 'text-blue-700 dark:text-blue-300'}`}>
+                ₹{usedBudget.toFixed(0)} / ₹{monthlyBudget.toFixed(0)}
+              </span>
+            </div>
+            <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${overBudget ? 'bg-red-500' : budgetPct > 80 ? 'bg-amber-500' : 'bg-blue-500'}`}
+                style={{ width: `${budgetPct}%` }}
+              />
+            </div>
+            <p className={`text-xs font-medium ${overBudget ? 'text-red-600' : 'text-slate-500'}`}>
+              {overBudget
+                ? '⚠️ Budget limit reached. Please contact Admin to add more expenses.'
+                : `₹${Math.max(0, remainingBudget!).toFixed(0)} remaining this month`}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-3">
@@ -225,11 +293,9 @@ const MyConveyancePage: React.FC = () => {
               const isExpanded = expandedId === exp.id;
               const hasCredit  = Number(exp.credit_total) > 0;
               return (
-                <div key={exp.id}
-                  className={exp.status === 'pending' ? 'opacity-80' : ''}>
+                <div key={exp.id} className={exp.status === 'pending' ? 'opacity-80' : ''}>
                   <div className="p-4 flex items-start gap-3">
                     <div className="flex-1 min-w-0 space-y-1">
-                      {/* Title row */}
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold text-sm text-slate-900 dark:text-white">
                           {leadMap[exp.lead_id] || exp.description || 'Ad-hoc Expense'}
@@ -241,8 +307,6 @@ const MyConveyancePage: React.FC = () => {
                           </span>
                         )}
                       </div>
-
-                      {/* Meta row */}
                       <div className="flex gap-3 flex-wrap text-xs">
                         <span className="text-slate-500">{exp.expense_date}</span>
                         <span className="text-blue-600 font-medium">{exp.kilometres} km</span>
@@ -251,21 +315,15 @@ const MyConveyancePage: React.FC = () => {
                           <span className="text-green-600 font-medium">Credit: ₹{exp.credit_total}</span>
                         )}
                       </div>
-
-                      {/* Admin rejection comment */}
                       {exp.status === 'rejected' && exp.admin_comment && (
                         <div className="text-xs text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-2 mt-1">
                           <strong>Admin:</strong> {exp.admin_comment}
                         </div>
                       )}
-
-                      {/* Notes */}
                       {exp.notes && (
                         <p className="text-xs text-slate-400 italic">{exp.notes}</p>
                       )}
                     </div>
-
-                    {/* Expand button (only if has credit breakdown) */}
                     {hasCredit && (
                       <button
                         onClick={() => setExpandedId(isExpanded ? null : exp.id)}
@@ -274,8 +332,6 @@ const MyConveyancePage: React.FC = () => {
                       </button>
                     )}
                   </div>
-
-                  {/* Credit breakdown expanded */}
                   {isExpanded && exp.credit_breakdown && (
                     <div className="mx-4 mb-3 p-3 bg-green-50 dark:bg-green-950/20 border border-green-100 dark:border-green-900 rounded-xl">
                       <p className="text-[10px] font-bold text-green-700 uppercase mb-2">Credit Breakdown</p>
@@ -316,8 +372,36 @@ const MyConveyancePage: React.FC = () => {
             </DialogTitle>
           </DialogHeader>
 
+          {/* Budget warning inside modal */}
+          {monthlyBudget !== null && (
+            <div className={`rounded-lg p-3 text-xs flex items-center gap-2 ${
+              overBudget
+                ? 'bg-red-50 border border-red-200 text-red-700'
+                : remainingBudget! < 500
+                  ? 'bg-amber-50 border border-amber-200 text-amber-700'
+                  : 'bg-blue-50 border border-blue-200 text-blue-700'
+            }`}>
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              {overBudget
+                ? 'Budget limit reached. Cannot submit new expenses.'
+                : `Budget: ₹${usedBudget.toFixed(0)} used of ₹${monthlyBudget.toFixed(0)} — ₹${remainingBudget!.toFixed(0)} remaining`}
+            </div>
+          )}
+
+          {/* Real-time budget preview */}
+          {monthlyBudget !== null && previewAmount > 0 && (
+            <div className={`rounded-lg p-2.5 text-xs flex items-center gap-2 ${
+              wouldExceed
+                ? 'bg-red-50 border border-red-200 text-red-700'
+                : 'bg-green-50 border border-green-200 text-green-700'
+            }`}>
+              {wouldExceed
+                ? `⚠️ This expense of ₹${previewAmount.toFixed(0)} would exceed your budget by ₹${((usedBudget + previewAmount) - monthlyBudget).toFixed(0)}`
+                : `✅ After this: ₹${(usedBudget + previewAmount).toFixed(0)} of ₹${monthlyBudget.toFixed(0)}`}
+            </div>
+          )}
+
           <div className="space-y-3 py-1">
-            {/* Date */}
             <div>
               <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5 block">Date *</label>
               <Input
@@ -326,8 +410,6 @@ const MyConveyancePage: React.FC = () => {
                 onChange={e => setForm(p => ({ ...p, expense_date: e.target.value }))}
               />
             </div>
-
-            {/* Description */}
             <div>
               <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5 block">Description / Purpose *</label>
               <Input
@@ -336,8 +418,6 @@ const MyConveyancePage: React.FC = () => {
                 onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
               />
             </div>
-
-            {/* KM + Conveyance */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5 block">Kilometres *</label>
@@ -410,7 +490,6 @@ const MyConveyancePage: React.FC = () => {
               </div>
             )}
 
-            {/* Notes */}
             <div>
               <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5 block">Notes (optional)</label>
               <textarea
@@ -424,7 +503,11 @@ const MyConveyancePage: React.FC = () => {
 
           <DialogFooter className="gap-2 pt-2">
             <Button variant="outline" onClick={resetAndClose} disabled={saving}>Cancel</Button>
-            <Button onClick={handleSubmit} disabled={saving} className="bg-blue-600 hover:bg-blue-700">
+            <Button
+              onClick={handleSubmit}
+              disabled={saving || (monthlyBudget !== null && overBudget)}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
               {saving ? 'Submitting...' : 'Submit Expense'}
             </Button>
           </DialogFooter>
