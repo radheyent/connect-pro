@@ -1,19 +1,24 @@
 /**
- * StatusSelect — Professional status dropdown with icons and colors.
- * Replaces plain <Select> for lead status updates across the app.
- * Large touch targets, clear visual hierarchy, mobile-optimized.
+ * StatusSelect — Bespoke dark card-style status selector.
+ * Matches screenshot design: dark navy cards, colored icon containers,
+ * status badge chips, glow borders on selection.
+ * After selection → other options collapse. Tap again → expand.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { cn } from '@/lib/utils';
 
 export interface StatusOption {
   value: string;
   label: string;
-  icon: string;       // emoji icon
-  color: string;      // tailwind text color
-  bg: string;         // tailwind bg color
-  border: string;     // tailwind border color
+  icon: string;
+  color: string;
+  bg: string;
+  border: string;
   description?: string;
+  iconBg: string;       // colored icon container background
+  badgeLabel: string;   // chip label e.g. "CONNECTED", "DECLINED"
+  badgeColor: string;   // chip text + border color classes
+  glowColor: string;    // selected card glow color (box-shadow inline style)
 }
 
 export const STATUS_OPTIONS: StatusOption[] = [
@@ -21,46 +26,66 @@ export const STATUS_OPTIONS: StatusOption[] = [
     value: 'Not Connected',
     label: 'Not Connected',
     icon: '📵',
-    color: 'text-slate-700 dark:text-slate-300',
-    bg: 'bg-slate-100 dark:bg-slate-800',
-    border: 'border-slate-200 dark:border-slate-700',
+    color: 'text-slate-300',
+    bg: 'bg-[#141c2e]',
+    border: 'border-slate-700',
     description: 'Call not answered',
+    iconBg: 'bg-slate-700',
+    badgeLabel: 'NO ANSWER',
+    badgeColor: 'text-slate-400 border-slate-600',
+    glowColor: 'rgba(148,163,184,0.35)',
   },
   {
     value: 'Not Interested',
     label: 'Not Interested',
     icon: '🚫',
-    color: 'text-orange-700 dark:text-orange-300',
-    bg: 'bg-orange-50 dark:bg-orange-950/30',
-    border: 'border-orange-200 dark:border-orange-800',
+    color: 'text-orange-300',
+    bg: 'bg-[#1e140a]',
+    border: 'border-orange-800',
     description: 'Customer declined',
+    iconBg: 'bg-orange-900/70',
+    badgeLabel: 'DECLINED',
+    badgeColor: 'text-orange-400 border-orange-700',
+    glowColor: 'rgba(251,146,60,0.35)',
   },
   {
     value: 'Interested',
     label: 'Interested',
     icon: '✅',
-    color: 'text-green-700 dark:text-green-300',
-    bg: 'bg-green-50 dark:bg-green-950/30',
-    border: 'border-green-200 dark:border-green-800',
+    color: 'text-green-300',
+    bg: 'bg-[#0a1e10]',
+    border: 'border-green-700',
     description: 'Customer wants to proceed',
+    iconBg: 'bg-green-900/70',
+    badgeLabel: 'WARM LEAD',
+    badgeColor: 'text-green-400 border-green-700',
+    glowColor: 'rgba(74,222,128,0.35)',
   },
   {
     value: 'Follow-up',
     label: 'Follow-up',
     icon: '🔔',
-    color: 'text-blue-700 dark:text-blue-300',
-    bg: 'bg-blue-50 dark:bg-blue-950/30',
-    border: 'border-blue-200 dark:border-blue-800',
+    color: 'text-blue-300',
+    bg: 'bg-[#0a0f1e]',
+    border: 'border-blue-700',
     description: 'Call back later',
+    iconBg: 'bg-blue-900/70',
+    badgeLabel: 'CALLBACK',
+    badgeColor: 'text-blue-400 border-blue-700',
+    glowColor: 'rgba(96,165,250,0.35)',
   },
   {
     value: 'Complete',
     label: 'Complete',
     icon: '🏆',
-    color: 'text-emerald-700 dark:text-emerald-300',
-    bg: 'bg-emerald-50 dark:bg-emerald-950/30',
-    border: 'border-emerald-300 dark:border-emerald-700',
+    color: 'text-emerald-300',
+    bg: 'bg-[#081a12]',
+    border: 'border-emerald-600',
     description: 'Sale closed successfully',
+    iconBg: 'bg-emerald-900/70',
+    badgeLabel: 'CLOSED',
+    badgeColor: 'text-emerald-400 border-emerald-600',
+    glowColor: 'rgba(52,211,153,0.4)',
   },
 ];
 
@@ -72,10 +97,6 @@ interface StatusSelectProps {
   className?: string;
 }
 
-/**
- * A full-page-style status selector designed for mobile.
- * Shows each status as a large tappable card with icon + description.
- */
 const StatusSelect: React.FC<StatusSelectProps> = ({
   value,
   onChange,
@@ -83,63 +104,102 @@ const StatusSelect: React.FC<StatusSelectProps> = ({
   disabled = false,
   className,
 }) => {
+  const [collapsed, setCollapsed] = useState(false);
+
   const options = STATUS_OPTIONS.filter(o => allowComplete || o.value !== 'Complete');
   const selected = options.find(o => o.value === value);
 
+  const handleSelect = (optValue: string) => {
+    if (disabled) return;
+    if (optValue === value && collapsed) {
+      // Tap selected again → expand
+      setCollapsed(false);
+      return;
+    }
+    onChange(optValue);
+    setCollapsed(true);
+  };
+
   return (
-    <div className={cn("space-y-2", className)}>
+    <div
+      className={cn('space-y-2', className)}
+      style={{ fontFamily: "'DM Sans', 'Sora', sans-serif" }}
+    >
       {options.map(opt => {
         const isSelected = value === opt.value;
+        const isHidden = collapsed && !isSelected;
+
+        if (isHidden) return null;
+
         return (
           <button
             key={opt.value}
             type="button"
             disabled={disabled}
-            onClick={() => onChange(opt.value)}
-            className={cn(
-              "w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 transition-all text-left",
-              "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1",
-              "disabled:opacity-50 disabled:cursor-not-allowed",
+            onClick={() => handleSelect(opt.value)}
+            style={
               isSelected
-                ? cn(opt.bg, opt.border, "shadow-sm ring-2", opt.border.replace('border-', 'ring-'))
-                : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
+                ? {
+                    boxShadow: `0 0 0 2px ${opt.glowColor}, 0 4px 24px ${opt.glowColor}`,
+                  }
+                : {}
+            }
+            className={cn(
+              'w-full flex items-center gap-3 px-4 py-3 rounded-2xl border transition-all duration-200 text-left',
+              'focus:outline-none focus:ring-2 focus:ring-blue-500/50',
+              'disabled:opacity-40 disabled:cursor-not-allowed',
+              'active:scale-[0.98]',
+              isSelected
+                ? cn(opt.bg, opt.border, 'border-2')
+                : 'bg-[#111827] border-[#1f2a3d] hover:border-[#2d3f57] hover:bg-[#141d2e]'
             )}
           >
-            {/* Icon */}
-            <span className="text-2xl shrink-0 select-none" role="img" aria-label={opt.label}>
+            {/* Colored icon container */}
+            <span
+              className={cn(
+                'w-11 h-11 rounded-xl flex items-center justify-center shrink-0 text-xl',
+                isSelected ? opt.iconBg : 'bg-[#1c2844]'
+              )}
+              role="img"
+              aria-label={opt.label}
+            >
               {opt.icon}
             </span>
 
             {/* Label + description */}
             <div className="flex-1 min-w-0">
               <p className={cn(
-                "text-sm font-bold",
-                isSelected ? opt.color : "text-slate-800 dark:text-slate-200"
+                'text-sm font-bold tracking-tight',
+                isSelected ? opt.color : 'text-slate-200'
               )}>
                 {opt.label}
               </p>
               {opt.description && (
-                <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                <p className="text-xs text-slate-500 mt-0.5 leading-snug">
                   {opt.description}
                 </p>
               )}
             </div>
 
-            {/* Selected indicator */}
-            {isSelected && (
-              <div className={cn(
-                "w-5 h-5 rounded-full flex items-center justify-center shrink-0",
-                opt.bg,
-                opt.color
-              )}>
-                <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                </svg>
-              </div>
-            )}
+            {/* Badge chip */}
+            <span
+              className={cn(
+                'shrink-0 text-[10px] font-bold tracking-widest px-2 py-1 rounded-md border',
+                isSelected ? opt.badgeColor : 'text-slate-600 border-slate-700'
+              )}
+            >
+              {opt.badgeLabel}
+            </span>
           </button>
         );
       })}
+
+      {/* Expand hint when collapsed */}
+      {collapsed && selected && (
+        <p className="text-center text-[11px] text-slate-600 pt-1 tracking-wide select-none">
+          Tap to change status
+        </p>
+      )}
     </div>
   );
 };
