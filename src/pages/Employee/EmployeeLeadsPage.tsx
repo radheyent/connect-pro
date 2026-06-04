@@ -699,63 +699,170 @@ const EmployeeLeadsPage: React.FC = () => {
       {/* ── Lead Details Modal ── */}
       <Dialog open={isDetailsModalOpen} onOpenChange={setIsDetailsModalOpen}>
         <DialogContent className="sm:max-w-[550px] p-0 overflow-hidden">
-          <div className="bg-slate-900 text-white p-6">
-            <div className="flex justify-between items-start">
-              <div>
-                <h2 className="text-xl font-bold">{activeLead?.name}</h2>
-                <p className="text-slate-400 font-mono text-sm mt-1">{activeLead?.phone}</p>
+
+          {/* Header */}
+          <div className="bg-slate-900 text-white p-5">
+            <div className="flex justify-between items-start gap-3">
+              <div className="min-w-0">
+                <h2 className="text-xl font-bold leading-tight">{activeLead?.name}</h2>
+                <p className="text-slate-400 font-mono text-sm mt-1 break-all">{activeLead?.phone}</p>
               </div>
-              <span className={cn("px-2.5 py-1 text-[10px] font-bold rounded-full uppercase shrink-0 mt-0.5",
+              <span className={cn(
+                "px-2.5 py-1 text-[10px] font-bold rounded-full uppercase shrink-0 mt-0.5 whitespace-nowrap",
                 activeLead?.status === 'Interested' ? "bg-green-100 text-green-700" :
-                activeLead?.status === 'Follow-up' ? "bg-blue-100 text-blue-700" :
-                activeLead?.status === 'Complete' ? "bg-blue-600 text-white" :
-                "bg-slate-700 text-slate-300")}>
+                activeLead?.status === 'Follow-up'  ? "bg-blue-100 text-blue-700"  :
+                activeLead?.status === 'Complete'   ? "bg-blue-600 text-white"     :
+                activeLead?.status === 'Not Interested' ? "bg-orange-100 text-orange-700" :
+                "bg-slate-700 text-slate-300"
+              )}>
                 {activeLead?.status || 'Fresh'}
               </span>
             </div>
           </div>
-          <div className="p-5 space-y-3 max-h-[60vh] overflow-y-auto">
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              {[
-                ['Matching No.', activeLead?.matching_number || '—'],
-                ['Operator', activeLead?.current_operator || '—'],
-                ['Last Call', activeLead?.last_call_date ? format(new Date(activeLead.last_call_date), 'HH:mm dd/MM/yy') : '—'],
-                ['Duration', `${activeLead?.last_call_duration || 0}s`],
-              ].map(([label, value]) => (
-                <div key={label} className="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
-                  <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">{label}</p>
-                  <p className="text-sm font-medium text-slate-800 truncate">{value}</p>
-                </div>
-              ))}
+
+          {/* Body — scrollable */}
+          <div className="p-5 space-y-3 max-h-[65vh] overflow-y-auto">
+
+            {/* ── Info grid — 2 column ── */}
+            <div className="grid grid-cols-2 gap-3">
+
+              {/* Matching Number — full width if long text */}
+              <div className="col-span-2 bg-slate-50 dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                  📱 Matching Number
+                </p>
+                {/* FIX: break-all instead of truncate — shows full number/text */}
+                <p className="text-sm font-medium text-slate-800 dark:text-slate-200 break-all leading-relaxed">
+                  {activeLead?.matching_number || (
+                    <span className="text-slate-400 italic text-xs">Not available</span>
+                  )}
+                </p>
+              </div>
+
+              {/* Operator */}
+              <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                  📶 Operator
+                </p>
+                <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                  {activeLead?.current_operator || (
+                    <span className="text-slate-400 italic text-xs">N/A</span>
+                  )}
+                </p>
+              </div>
+
+              {/* Last Call */}
+              <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                  📞 Last Call
+                </p>
+                <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                  {activeLead?.last_call_date
+                    ? format(new Date(activeLead.last_call_date), 'HH:mm dd/MM/yy')
+                    : <span className="text-slate-400 italic text-xs">No calls yet</span>}
+                </p>
+                {activeLead?.last_call_date && (
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    {activeLead?.last_call_duration || 0}s duration
+                  </p>
+                )}
+              </div>
             </div>
-            {activeLead?.notes && (
-              <div className="bg-slate-50 border rounded-lg p-3">
-                <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">Notes</p>
-                <p className="text-sm text-slate-700 whitespace-pre-wrap">{activeLead.notes}</p>
+
+            {/* ── Follow-up (if set) ── */}
+            {activeLead?.follow_up_date && (
+              <div className="flex items-center gap-2.5 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-700 rounded-lg">
+                <span className="text-lg shrink-0">🔔</span>
+                <div className="min-w-0">
+                  <p className="text-[9px] font-bold text-amber-600 uppercase tracking-wider">Follow-up Scheduled</p>
+                  <p className="text-sm font-bold text-amber-900 dark:text-amber-200">
+                    {format(new Date(activeLead.follow_up_date), 'dd MMM yyyy')}
+                    {activeLead.follow_up_time && (
+                      <span className="ml-2 px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900 rounded text-[10px] font-bold">
+                        {activeLead.follow_up_time}
+                      </span>
+                    )}
+                  </p>
+                </div>
               </div>
             )}
+
+            {/* ── Notes — ALWAYS shown, with placeholder if empty ── */}
+            <div className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3">
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                📝 Notes / Remarks
+              </p>
+              {activeLead?.notes && activeLead.notes.trim() !== '' ? (
+                /* FIX: whitespace-pre-wrap shows full text, break-words prevents overflow */
+                <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-words leading-relaxed">
+                  {activeLead.notes}
+                </p>
+              ) : (
+                <p className="text-xs text-slate-400 italic">No notes added yet</p>
+              )}
+            </div>
+
+            {/* ── Important flag ── */}
+            {activeLead?.important && (
+              <div className="flex items-center gap-2 p-2.5 bg-red-50 dark:bg-red-950/30 border border-red-100 dark:border-red-800 rounded-lg">
+                <span className="text-base">⭐</span>
+                <p className="text-xs font-bold text-red-600 dark:text-red-400">
+                  Marked as Important Lead
+                </p>
+              </div>
+            )}
+
+            {/* ── Pending recall ── */}
+            {activeLead?.pending_recall && (
+              <div className="flex items-center gap-2 p-2.5 bg-orange-50 dark:bg-orange-950/30 border border-orange-100 dark:border-orange-800 rounded-lg">
+                <span className="text-base">🔁</span>
+                <p className="text-xs font-bold text-orange-600 dark:text-orange-400">
+                  Recall Required — Admin flagged this lead
+                </p>
+              </div>
+            )}
+
           </div>
-          <div className="p-4 border-t bg-slate-50 flex gap-2">
-            <Button className="flex-1" size="sm" onClick={() => { setIsDetailsModalOpen(false); startCall(activeLead!); }}>
+
+          {/* Footer actions */}
+          <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex gap-2">
+            <Button
+              className="flex-1 bg-blue-600 hover:bg-blue-700"
+              size="sm"
+              onClick={() => { setIsDetailsModalOpen(false); startCall(activeLead!); }}
+            >
               <Phone className="h-3.5 w-3.5 mr-1.5" />CALL NOW
             </Button>
-            <Button variant="outline" size="sm" className="flex-1"
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1"
               onClick={() => {
-                if (!canUpdateStatus(activeLead!)) { toast.error('📞 Call first'); return; }
+                if (!canUpdateStatus(activeLead!)) { toast.error('📞 Call first to update status'); return; }
                 setIsDetailsModalOpen(false);
                 setEditStatus(activeLead?.status || 'Fresh');
                 setEditNotes(activeLead?.notes || '');
                 setEditFollowUpDate(activeLead?.follow_up_date || '');
                 setEditFollowUpTime(activeLead?.follow_up_time || '');
                 setIsEditModalOpen(true);
-              }}>
-              {canUpdateStatus(activeLead!) ? 'UPDATE' : '🔒 Call First'}
+              }}
+            >
+              {canUpdateStatus(activeLead!) ? '✏️ UPDATE' : '🔒 Call First'}
             </Button>
-            <Button variant="outline" size="sm" className="flex-1"
-              onClick={() => { setIsDetailsModalOpen(false); setIsHistoryModalOpen(true); fetchCallHistory(activeLead?.id!); }}>
-              HISTORY
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              onClick={() => {
+                setIsDetailsModalOpen(false);
+                setIsHistoryModalOpen(true);
+                fetchCallHistory(activeLead?.id!);
+              }}
+            >
+              🕐 HISTORY
             </Button>
           </div>
+
         </DialogContent>
       </Dialog>
     </div>
