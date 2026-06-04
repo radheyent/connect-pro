@@ -698,58 +698,108 @@ const EmployeeLeadsPage: React.FC = () => {
 
       {/* ── Lead Details Modal ── */}
       <Dialog open={isDetailsModalOpen} onOpenChange={setIsDetailsModalOpen}>
-        <DialogContent className="sm:max-w-[550px] p-0 overflow-hidden">
-          <div className="bg-slate-900 text-white p-6">
-            <div className="flex justify-between items-start">
-              <div>
-                <h2 className="text-xl font-bold">{activeLead?.name}</h2>
-                <p className="text-slate-400 font-mono text-sm mt-1">{activeLead?.phone}</p>
+        <DialogContent className="sm:max-w-[520px] p-0 overflow-hidden rounded-2xl">
+
+          {/* ── Header: gradient + avatar ── */}
+          <div className="relative bg-gradient-to-br from-slate-800 via-slate-900 to-slate-800 px-5 pt-6 pb-10">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                {/* Avatar circle with initials */}
+                <div className="h-11 w-11 rounded-full bg-white/10 border border-white/20 flex items-center justify-center shrink-0">
+                  <span className="text-lg font-black text-white leading-none">
+                    {activeLead?.name?.charAt(0)?.toUpperCase() || '?'}
+                  </span>
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-[17px] font-bold text-white leading-tight truncate">{activeLead?.name}</h2>
+                  <p className="text-slate-400 font-mono text-xs mt-0.5 tracking-wider">{activeLead?.phone}</p>
+                </div>
               </div>
-              <span className={cn("px-2.5 py-1 text-[10px] font-bold rounded-full uppercase shrink-0 mt-0.5",
-                activeLead?.status === 'Interested' ? "bg-green-100 text-green-700" :
-                activeLead?.status === 'Follow-up' ? "bg-blue-100 text-blue-700" :
-                activeLead?.status === 'Complete' ? "bg-blue-600 text-white" :
-                "bg-slate-700 text-slate-300")}>
+              <span className={cn("px-2.5 py-1 text-[10px] font-bold rounded-full uppercase shrink-0 mt-0.5 tracking-wide",
+                activeLead?.status === 'Interested' ? "bg-green-400/20 text-green-300 border border-green-400/30" :
+                activeLead?.status === 'Follow-up'  ? "bg-blue-400/20 text-blue-300 border border-blue-400/30" :
+                activeLead?.status === 'Complete'   ? "bg-indigo-400/20 text-indigo-300 border border-indigo-400/30" :
+                "bg-white/10 text-slate-300 border border-white/10")}>
                 {activeLead?.status || 'Fresh'}
               </span>
             </div>
           </div>
-          <div className="p-4 space-y-2 max-h-[60vh] overflow-y-auto">
-            {/* Row: Matching No */}
-            <div className="flex items-start gap-3 py-2.5 border-b border-slate-100">
-              <span className="text-[10px] font-bold text-slate-400 uppercase w-24 shrink-0 pt-0.5 tracking-wide">Matching No.</span>
-              <span className="text-sm font-semibold text-slate-800 break-all leading-relaxed flex-1">
-                {activeLead?.matching_number || <span className="text-slate-300 font-normal">—</span>}
-              </span>
+
+          {/* ── Info Cards: overlapping the header ── */}
+          <div className="-mt-6 px-4 space-y-2.5 pb-4 max-h-[55vh] overflow-y-auto">
+
+            {/* Matching Number — violet accent */}
+            <div className="bg-white rounded-xl shadow-sm border border-violet-100 overflow-hidden">
+              <div className="flex items-center gap-2 bg-violet-50 px-3 py-1.5 border-b border-violet-100">
+                <div className="h-1.5 w-1.5 rounded-full bg-violet-400 shrink-0" />
+                <span className="text-[10px] font-bold text-violet-500 uppercase tracking-widest">Matching Number</span>
+              </div>
+              <div className="px-3 py-2.5">
+                <p className={cn("text-sm font-semibold leading-relaxed break-all",
+                  activeLead?.matching_number ? "text-violet-900" : "text-slate-300 font-normal italic")}>
+                  {activeLead?.matching_number || 'Not provided'}
+                </p>
+              </div>
             </div>
-            {/* Row: Operator */}
-            <div className="flex items-start gap-3 py-2.5 border-b border-slate-100">
-              <span className="text-[10px] font-bold text-slate-400 uppercase w-24 shrink-0 pt-0.5 tracking-wide">Operator</span>
-              <span className="text-sm font-semibold text-slate-800 break-words whitespace-pre-wrap leading-relaxed flex-1">
-                {activeLead?.current_operator || <span className="text-slate-300 font-normal">—</span>}
-              </span>
+
+            {/* Operator — amber accent */}
+            <div className="bg-white rounded-xl shadow-sm border border-amber-100 overflow-hidden">
+              <div className="flex items-center gap-2 bg-amber-50 px-3 py-1.5 border-b border-amber-100">
+                <div className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />
+                <span className="text-[10px] font-bold text-amber-600 uppercase tracking-widest">Operator</span>
+              </div>
+              <div className="px-3 py-2.5">
+                <p className={cn("text-sm font-semibold leading-relaxed break-words whitespace-pre-wrap",
+                  activeLead?.current_operator ? "text-amber-900" : "text-slate-300 font-normal italic")}>
+                  {activeLead?.current_operator || 'Not provided'}
+                </p>
+              </div>
             </div>
-            {/* Row: Last Call + Duration side by side */}
-            <div className="flex items-start gap-3 py-2.5 border-b border-slate-100">
-              <span className="text-[10px] font-bold text-slate-400 uppercase w-24 shrink-0 pt-0.5 tracking-wide">Last Call</span>
-              <span className="text-sm font-semibold text-slate-800 flex-1">
-                {activeLead?.last_call_date ? format(new Date(activeLead.last_call_date), 'HH:mm · dd MMM yy') : <span className="text-slate-300 font-normal">—</span>}
-              </span>
-              <span className="text-xs text-slate-400 shrink-0 pt-0.5">{activeLead?.last_call_duration ? `${activeLead.last_call_duration}s` : ''}</span>
+
+            {/* Last Call + Duration — teal accent */}
+            <div className="bg-white rounded-xl shadow-sm border border-teal-100 overflow-hidden">
+              <div className="flex items-center gap-2 bg-teal-50 px-3 py-1.5 border-b border-teal-100">
+                <div className="h-1.5 w-1.5 rounded-full bg-teal-400 shrink-0" />
+                <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest">Last Call</span>
+              </div>
+              <div className="px-3 py-2.5 flex items-center justify-between gap-2">
+                <p className={cn("text-sm font-semibold",
+                  activeLead?.last_call_date ? "text-teal-900" : "text-slate-300 font-normal italic")}>
+                  {activeLead?.last_call_date
+                    ? format(new Date(activeLead.last_call_date), 'hh:mm a · dd MMM yyyy')
+                    : 'No calls yet'}
+                </p>
+                {activeLead?.last_call_duration ? (
+                  <span className="shrink-0 text-[10px] font-bold bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full">
+                    {activeLead.last_call_duration}s
+                  </span>
+                ) : null}
+              </div>
             </div>
-            {/* Notes */}
+
+            {/* Notes — rose accent, only if filled */}
             {activeLead?.notes && (
-              <div className="py-2.5">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1.5">Notes</p>
-                <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed bg-slate-50 rounded-lg p-3 border border-slate-100">{activeLead.notes}</p>
+              <div className="bg-white rounded-xl shadow-sm border border-rose-100 overflow-hidden">
+                <div className="flex items-center gap-2 bg-rose-50 px-3 py-1.5 border-b border-rose-100">
+                  <div className="h-1.5 w-1.5 rounded-full bg-rose-400 shrink-0" />
+                  <span className="text-[10px] font-bold text-rose-500 uppercase tracking-widest">Notes</span>
+                </div>
+                <div className="px-3 py-2.5">
+                  <p className="text-sm text-rose-900 whitespace-pre-wrap leading-relaxed font-medium">{activeLead.notes}</p>
+                </div>
               </div>
             )}
           </div>
-          <div className="p-4 border-t bg-slate-50 flex gap-2">
-            <Button className="flex-1" size="sm" onClick={() => { setIsDetailsModalOpen(false); startCall(activeLead!); }}>
+
+          {/* ── Footer Actions ── */}
+          <div className="px-4 pb-4 pt-1 flex gap-2">
+            <Button size="sm"
+              className="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl h-10 text-xs tracking-wide shadow"
+              onClick={() => { setIsDetailsModalOpen(false); startCall(activeLead!); }}>
               <Phone className="h-3.5 w-3.5 mr-1.5" />CALL NOW
             </Button>
-            <Button variant="outline" size="sm" className="flex-1"
+            <Button variant="outline" size="sm"
+              className="flex-1 border-slate-200 text-slate-700 font-bold rounded-xl h-10 text-xs tracking-wide hover:bg-slate-50"
               onClick={() => {
                 if (!canUpdateStatus(activeLead!)) { toast.error('📞 Call first'); return; }
                 setIsDetailsModalOpen(false);
@@ -761,11 +811,13 @@ const EmployeeLeadsPage: React.FC = () => {
               }}>
               {canUpdateStatus(activeLead!) ? 'UPDATE' : '🔒 Call First'}
             </Button>
-            <Button variant="outline" size="sm" className="flex-1"
+            <Button variant="outline" size="sm"
+              className="flex-1 border-slate-200 text-slate-700 font-bold rounded-xl h-10 text-xs tracking-wide hover:bg-slate-50"
               onClick={() => { setIsDetailsModalOpen(false); setIsHistoryModalOpen(true); fetchCallHistory(activeLead?.id!); }}>
               HISTORY
             </Button>
           </div>
+
         </DialogContent>
       </Dialog>
     </div>
