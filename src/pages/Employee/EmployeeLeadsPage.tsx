@@ -714,35 +714,34 @@ const EmployeeLeadsPage: React.FC = () => {
               </span>
             </div>
           </div>
-          <div className="p-5 space-y-3 max-h-[60vh] overflow-y-auto">
-            <div className="space-y-3 text-sm">
-              {/* Matching No. and Operator — full width so long text wraps properly */}
-              {[
-                ['Matching No.', activeLead?.matching_number || '—'],
-                ['Operator', activeLead?.current_operator || '—'],
-              ].map(([label, value]) => (
-                <div key={label} className="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
-                  <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">{label}</p>
-                  <p className="text-sm font-medium text-slate-800 break-words whitespace-pre-wrap">{value}</p>
-                </div>
-              ))}
-              {/* Last Call and Duration — short values, 2-col is fine */}
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  ['Last Call', activeLead?.last_call_date ? format(new Date(activeLead.last_call_date), 'HH:mm dd/MM/yy') : '—'],
-                  ['Duration', `${activeLead?.last_call_duration || 0}s`],
-                ].map(([label, value]) => (
-                  <div key={label} className="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
-                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">{label}</p>
-                    <p className="text-sm font-medium text-slate-800">{value}</p>
-                  </div>
-                ))}
-              </div>
+          <div className="p-4 space-y-2 max-h-[60vh] overflow-y-auto">
+            {/* Row: Matching No */}
+            <div className="flex items-start gap-3 py-2.5 border-b border-slate-100">
+              <span className="text-[10px] font-bold text-slate-400 uppercase w-24 shrink-0 pt-0.5 tracking-wide">Matching No.</span>
+              <span className="text-sm font-semibold text-slate-800 break-all leading-relaxed flex-1">
+                {activeLead?.matching_number || <span className="text-slate-300 font-normal">—</span>}
+              </span>
             </div>
+            {/* Row: Operator */}
+            <div className="flex items-start gap-3 py-2.5 border-b border-slate-100">
+              <span className="text-[10px] font-bold text-slate-400 uppercase w-24 shrink-0 pt-0.5 tracking-wide">Operator</span>
+              <span className="text-sm font-semibold text-slate-800 break-words whitespace-pre-wrap leading-relaxed flex-1">
+                {activeLead?.current_operator || <span className="text-slate-300 font-normal">—</span>}
+              </span>
+            </div>
+            {/* Row: Last Call + Duration side by side */}
+            <div className="flex items-start gap-3 py-2.5 border-b border-slate-100">
+              <span className="text-[10px] font-bold text-slate-400 uppercase w-24 shrink-0 pt-0.5 tracking-wide">Last Call</span>
+              <span className="text-sm font-semibold text-slate-800 flex-1">
+                {activeLead?.last_call_date ? format(new Date(activeLead.last_call_date), 'HH:mm · dd MMM yy') : <span className="text-slate-300 font-normal">—</span>}
+              </span>
+              <span className="text-xs text-slate-400 shrink-0 pt-0.5">{activeLead?.last_call_duration ? `${activeLead.last_call_duration}s` : ''}</span>
+            </div>
+            {/* Notes */}
             {activeLead?.notes && (
-              <div className="bg-slate-50 border rounded-lg p-3">
-                <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">Notes</p>
-                <p className="text-sm text-slate-700 whitespace-pre-wrap">{activeLead.notes}</p>
+              <div className="py-2.5">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1.5">Notes</p>
+                <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed bg-slate-50 rounded-lg p-3 border border-slate-100">{activeLead.notes}</p>
               </div>
             )}
           </div>
