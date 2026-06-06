@@ -735,27 +735,7 @@ const ExpensesPage: React.FC = () => {
       {/* ── BUDGET MANAGEMENT ── */}
       {!loading && tab === 'Budget' && (
         <div className="space-y-4">
-          {/* SQL reminder banner */}
-          <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 dark:bg-amber-950/20 dark:border-amber-800 rounded-xl text-xs text-amber-800 dark:text-amber-200">
-            <ShieldAlert className="h-4 w-4 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold mb-1">Database Setup Required</p>
-              <p>Run this SQL in Supabase to enable Budget Management:</p>
-              <pre className="mt-2 p-2 bg-amber-100 dark:bg-amber-950/50 rounded text-[10px] overflow-x-auto whitespace-pre-wrap">{`CREATE TABLE IF NOT EXISTS public.expense_budgets (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id uuid REFERENCES public.user_profiles(id) ON DELETE CASCADE,
-  monthly_limit numeric(10,2) NOT NULL DEFAULT 0,
-  note text,
-  updated_by uuid,
-  updated_at timestamptz DEFAULT now(),
-  UNIQUE(user_id)
-);
-ALTER TABLE public.expense_budgets ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Admin full access" ON public.expense_budgets FOR ALL TO authenticated USING (true);`}</pre>
-            </div>
-          </div>
-
-          <Card>
+         <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Users className="h-5 w-5 text-blue-500" />
