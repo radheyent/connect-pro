@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import {
   LayoutDashboard, Users, Share2, PhoneMissed,
   BarChart3, Database, LogOut, Menu, Sun, Moon,
-  Bell, Wallet, Car, Receipt
+  Bell, Wallet, Car, Receipt, ExternalLink
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -107,6 +107,7 @@ const DashboardLayout: React.FC = () => {
       { name: 'My Conveyance',  path: '/field-boy/conveyance', icon: Car,           roles: ['field_boy'] },
       // ── Shared ──
       { name: 'Announcements',  path: '/announcements',      icon: Bell,            roles: ['admin','employee','field_boy'] },
+      { name: 'Attendance',     path: 'external',            url: 'https://script.google.com/macros/s/AKfycbyRxMMBPeEOPWHBi4rWSQ_tneLOxgltRsnP6aCwSp34-zsHx-XWQtfMHoatY7RdZwX3/exec', icon: ExternalLink, roles: ['admin','employee'] },
     ];
 
     return all.filter(item => item.roles.includes(role));
@@ -135,22 +136,37 @@ const DashboardLayout: React.FC = () => {
           {navItems.map(item => {
             const Icon     = item.icon;
             const isDash   = item.name === 'Dashboard';
-            const isActive = isDash
+            const isExternal = item.path === 'external';
+            const isActive = !isExternal && (isDash
               ? location.pathname === item.path
               : location.pathname === item.path ||
-                location.pathname.startsWith(item.path + '/');
+                location.pathname.startsWith(item.path + '/'));
 
-            return (
+            const linkClass = cn(
+              'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm',
+              isActive
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30'
+                : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+            );
+
+            return isExternal ? (
+              <a
+                key={item.name}
+                href={(item as any).url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={onNavClick}
+                className={linkClass}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span>{item.name}</span>
+              </a>
+            ) : (
               <Link
                 key={item.path}
                 to={item.path}
                 onClick={onNavClick}
-                className={cn(
-                  'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm',
-                  isActive
-                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30'
-                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                )}
+                className={linkClass}
               >
                 <Icon className="h-4 w-4 shrink-0" />
                 <span className={cn(isActive && 'font-semibold')}>{item.name}</span>
