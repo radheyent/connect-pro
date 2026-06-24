@@ -55,7 +55,8 @@ const EmployeeLeadsPage: React.FC = () => {
   // WhatsApp Modal State
   const [isWAModalOpen, setIsWAModalOpen] = useState(false);
   const [waData, setWAData] = useState({
-    totalNumbers: '1', anyCharge: 'Zero', note: '', pickupTime: ''
+    totalNumbers: '1', anyCharge: 'Zero', note: '',
+    number2: '', number3: ''
   });
 
   // Add Lead Modal State
@@ -196,12 +197,34 @@ const EmployeeLeadsPage: React.FC = () => {
 
   const handleWAShare = async () => {
     if (!activeLead || !profile) return;
-    const message = `Please close My sale\nCustomer Name: ${activeLead.name}\nCustomer No: ${activeLead.phone}\nTotal Numbers: ${waData.totalNumbers}\nAny Charge: ${waData.anyCharge}\nNote: ${waData.note}\nPickup Time: ${waData.pickupTime}\nEmployee: ${profile.name}`;
+
+    const totalNum = parseInt(waData.totalNumbers, 10);
+
+    // Build number lines: matching number = 1st, then extra numbers
+    let numberLines = `1st Number: ${activeLead.matching_number || activeLead.phone}`;
+    if (totalNum >= 2) numberLines += `\n2nd Number: ${waData.number2 || '—'}`;
+    if (totalNum >= 3) numberLines += `\n3rd Number: ${waData.number3 || '—'}`;
+
+    const message =
+      `🔔 Please Close My Sale\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `👤 Customer Name: ${activeLead.name}\n` +
+      `📞 Customer No: ${activeLead.phone}\n` +
+      `🔢 Matching Number: ${activeLead.matching_number || '—'}\n` +
+      `📡 Operator: ${activeLead.current_operator || '—'}\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `🔢 Total Numbers: ${waData.totalNumbers}\n` +
+      `${numberLines}\n` +
+      `💰 Any Charge: ${waData.anyCharge}\n` +
+      (waData.note ? `📝 Notes: ${waData.note}\n` : '') +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `👨‍💼 Employee: ${profile.name}`;
+
     try {
       await supabase.from('whatsapp_messages').insert({
         lead_id: activeLead.id, user_id: user?.id,
         total_numbers: waData.totalNumbers, any_charge: waData.anyCharge,
-        note: waData.note, pickup_time: waData.pickupTime, employee_name: profile.name
+        note: waData.note, employee_name: profile.name
       });
       if (navigator.share) await navigator.share({ text: message });
       else { await navigator.clipboard.writeText(message); toast.info('Message copied to clipboard!'); }
@@ -579,46 +602,105 @@ const EmployeeLeadsPage: React.FC = () => {
       </Dialog>
 
       {/* ── WhatsApp Share Modal ── */}
-      <Dialog open={isWAModalOpen} onOpenChange={setIsWAModalOpen}>
-        <DialogContent className="sm:max-w-[400px] p-0 overflow-hidden rounded-2xl border border-slate-200 shadow-2xl">
-          <div className="bg-green-600 text-white p-4">
-            <h4 className="font-bold">Close My Sale</h4>
-            <p className="text-[11px] opacity-80 uppercase font-semibold">WhatsApp Submission Form</p>
+      <Dialog open={isWAModalOpen} onOpenChange={(open) => {
+        setIsWAModalOpen(open);
+        if (!open) setWAData({ totalNumbers: '1', anyCharge: 'Zero', note: '', number2: '', number3: '' });
+      }}>
+        <DialogContent className="sm:max-w-[420px] p-0 overflow-hidden rounded-2xl border border-slate-200 shadow-2xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-green-600 text-white p-4 sticky top-0 z-10">
+            <h4 className="font-bold text-base">Close My Sale</h4>
+            <p className="text-[11px] opacity-80 uppercase font-semibold tracking-wider">WhatsApp Submission Form</p>
           </div>
-          <div className="p-6 space-y-4">
+          <div className="p-5 space-y-4">
+
+            {/* Row 1: Name + Number */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase">Customer Name</label>
-                <Input value={activeLead?.name} disabled className="bg-slate-50 text-slate-500 h-9" />
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Name</label>
+                <Input value={activeLead?.name || ''} disabled className="bg-slate-50 text-slate-500 h-9 text-sm" />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase">Customer No</label>
-                <Input value={activeLead?.phone} disabled className="bg-slate-50 text-slate-500 h-9" />
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Number</label>
+                <Input value={activeLead?.phone || ''} disabled className="bg-slate-50 text-slate-500 h-9 text-sm" />
               </div>
             </div>
+
+            {/* Row 2: Matching Number + Operator */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase">Total Numbers</label>
-                <Select value={waData.totalNumbers} onValueChange={v => setWAData({...waData, totalNumbers: v})}>
+                <label className="text-[10px] font-bold text-violet-500 uppercase tracking-wider">Matching Number</label>
+                <Input value={activeLead?.matching_number || '—'} disabled className="bg-violet-50 text-violet-700 h-9 text-sm font-medium" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-amber-500 uppercase tracking-wider">Operator</label>
+                <Input value={activeLead?.current_operator || '—'} disabled className="bg-amber-50 text-amber-700 h-9 text-sm font-medium" />
+              </div>
+            </div>
+
+            {/* Row 3: Total Numbers + Any Charge */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total Numbers</label>
+                <Select value={waData.totalNumbers} onValueChange={v => setWAData({ ...waData, totalNumbers: v, number2: '', number3: '' })}>
                   <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>{['1','2','3','4','5'].map(n => <SelectItem key={n} value={n}>{n}</SelectItem>)}</SelectContent>
+                  <SelectContent>
+                    {['1','2','3'].map(n => <SelectItem key={n} value={n}>{n}</SelectItem>)}
+                  </SelectContent>
                 </Select>
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase">Any Charge</label>
-                <Select value={waData.anyCharge} onValueChange={v => setWAData({...waData, anyCharge: v})}>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Any Charge</label>
+                <Select value={waData.anyCharge} onValueChange={v => setWAData({ ...waData, anyCharge: v })}>
                   <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>{['Zero','250','300','Other Type'].map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                  <SelectContent>
+                    {['Zero','250','300','Other Type'].map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
                 </Select>
               </div>
             </div>
-            <Input value={waData.note} onChange={e => setWAData({...waData, note: e.target.value})}
-              placeholder="Note (optional)" className="h-9" />
-            <Input type="time" value={waData.pickupTime} onChange={e => setWAData({...waData, pickupTime: e.target.value})}
-              className="h-9" />
-            <Button className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-6 rounded-xl flex items-center justify-center gap-2"
+
+            {/* Dynamic extra number fields */}
+            {parseInt(waData.totalNumbers) >= 2 && (
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">
+                  2nd Number <span className="text-slate-400 normal-case font-normal text-[10px]">(Matching = 1st)</span>
+                </label>
+                <Input
+                  value={waData.number2}
+                  onChange={e => setWAData({ ...waData, number2: e.target.value })}
+                  placeholder="Enter 2nd number"
+                  className="h-9 text-sm border-blue-200 focus:border-blue-400"
+                />
+              </div>
+            )}
+            {parseInt(waData.totalNumbers) >= 3 && (
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider">3rd Number</label>
+                <Input
+                  value={waData.number3}
+                  onChange={e => setWAData({ ...waData, number3: e.target.value })}
+                  placeholder="Enter 3rd number"
+                  className="h-9 text-sm border-indigo-200 focus:border-indigo-400"
+                />
+              </div>
+            )}
+
+            {/* Notes — Textarea (paragraph) */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Notes</label>
+              <textarea
+                value={waData.note}
+                onChange={e => setWAData({ ...waData, note: e.target.value })}
+                placeholder="Add notes here... (optional)"
+                rows={3}
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 resize-none transition-colors"
+              />
+            </div>
+
+            <Button
+              className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-6 rounded-xl flex items-center justify-center gap-2 text-sm"
               onClick={handleWAShare}>
-              <Share2 className="h-4 w-4" />Share to WhatsApp
+              <Share2 className="h-4 w-4" /> Share to WhatsApp
             </Button>
           </div>
         </DialogContent>
