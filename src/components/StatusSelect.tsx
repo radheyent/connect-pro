@@ -1,18 +1,7 @@
-/**
- * StatusSelect — Light unselected cards, dark selected card.
- * Each status has unique mixed gradient colors.
- * SVG icons, collapse on select, tap selected to expand.
- *
- * Logic:
- * - No selection: all cards visible
- * - After select: collapse → only selected card shown
- * - Tap selected card: de-collapse → all cards shown again
- * - Select again: collapse
- */
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 
-// ─── SVG Icons ────────────────────────────────────────────────────────────────
+// ─── SVG Icons (unchanged) ───────────────────────────────────────
 
 const Svg = ({ children, className }: { children: React.ReactNode; className?: string }) => (
   <svg
@@ -27,7 +16,6 @@ const Svg = ({ children, className }: { children: React.ReactNode; className?: s
   </svg>
 );
 
-/** Phone with a slash — call not connected */
 const IconNotConnected = ({ className }: { className?: string }) => (
   <Svg className={className}>
     <path d="M16.5 9.4l-9-5.19M10.68 13.31a16.1 16.1 0 0 0 1.89 2.12c.38.38.79.72 1.21 1.03" />
@@ -38,7 +26,6 @@ const IconNotConnected = ({ className }: { className?: string }) => (
   </Svg>
 );
 
-/** Circle with diagonal slash — not interested */
 const IconNotInterested = ({ className }: { className?: string }) => (
   <Svg className={className}>
     <circle cx="12" cy="12" r="10" />
@@ -46,14 +33,12 @@ const IconNotInterested = ({ className }: { className?: string }) => (
   </Svg>
 );
 
-/** Checkmark — interested / warm lead */
 const IconInterested = ({ className }: { className?: string }) => (
   <Svg className={className}>
     <polyline points="20 6 9 17 4 12" />
   </Svg>
 );
 
-/** Bell — follow-up / callback */
 const IconFollowUp = ({ className }: { className?: string }) => (
   <Svg className={className}>
     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -61,54 +46,27 @@ const IconFollowUp = ({ className }: { className?: string }) => (
   </Svg>
 );
 
-/** Star — complete / closed */
 const IconComplete = ({ className }: { className?: string }) => (
   <Svg className={className}>
     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
   </Svg>
 );
 
-/** Small check used in the selected indicator pill */
 const IconCheck = ({ className }: { className?: string }) => (
   <Svg className={className}>
     <polyline points="20 6 9 17 4 12" strokeWidth="2.5" />
   </Svg>
 );
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+const IconChevronDown = ({ className }: { className?: string }) => (
+  <Svg className={className}>
+    <polyline points="6 9 12 15 18 9" />
+  </Svg>
+);
 
-interface StatusOption {
-  value: string;
-  label: string;
-  description: string;
-  badgeLabel: string;
-  Icon: React.FC<{ className?: string }>;
-  // unselected (light)
-  cardBg: string;
-  cardBorder: string;
-  iconBg: string;
-  iconStroke: string;
-  titleColor: string;
-  descColor: string;
-  badgeColor: string;
-  badgeBorder: string;
-  badgeBg: string;
-  // selected (dark)
-  selCardBg: string;
-  selCardBorder: string;
-  selCardGlow: string;
-  selIconBg: string;
-  selIconStroke: string;
-  selTitleColor: string;
-  selDescColor: string;
-  selBadgeColor: string;
-  selBadgeBorder: string;
-  selBadgeBg: string;
-  selCheckBg: string;
-  selCheckStroke: string;
-}
+// ─── Options (complete array) ─────────────────────────────────
 
-export const STATUS_OPTIONS: StatusOption[] = [
+export const STATUS_OPTIONS = [
   {
     value: 'Not Connected',
     label: 'Not Connected',
@@ -251,7 +209,7 @@ export const STATUS_OPTIONS: StatusOption[] = [
   },
 ];
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Component ─────────────────────────────────────────────────
 
 interface StatusSelectProps {
   value: string;
@@ -268,129 +226,175 @@ const StatusSelect: React.FC<StatusSelectProps> = ({
   disabled = false,
   className,
 }) => {
-  /**
-   * collapsed = true  → only selected card visible (post-selection state)
-   * collapsed = false → all cards visible (initial state OR after tapping selected)
-   */
-  const [collapsed, setCollapsed] = useState(false);
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!popoverOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setPopoverOpen(false);
+      }
+    };
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPopoverOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('keydown', keyHandler);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('keydown', keyHandler);
+    };
+  }, [popoverOpen]);
 
   const options = STATUS_OPTIONS.filter(
     (o) => allowComplete || o.value !== 'Complete'
   );
+  const selected = options.find((o) => o.value === value);
+  const others = options.filter((o) => o.value !== value);
 
-  const handleCardClick = (optValue: string) => {
+  const handleSelect = (optValue: string) => {
     if (disabled) return;
-
-    const isSel = optValue === value;
-
-    if (isSel && collapsed) {
-      // Tap on already-selected card while collapsed → expand all
-      setCollapsed(false);
-      return;
-    }
-
-    // Select a new (or same while expanded) option → collapse
     onChange(optValue);
-    setCollapsed(true);
+    setPopoverOpen(false);
   };
 
+  if (!selected) return null;
+
+  // Compact card renderer (height reduced)
+  const cardContent = (
+    opt: any,
+    isSelected: boolean,
+    showCheck: boolean,
+    showChevron: boolean
+  ) => (
+    <div
+      className={cn(
+        'w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-[13px] border text-left',
+        'transition-[opacity,transform] duration-150 ease-out',
+        isSelected
+          ? cn(opt.selCardBg, opt.selCardBorder, opt.selCardGlow)
+          : cn(opt.cardBg, opt.cardBorder)
+      )}
+    >
+      {/* Icon container */}
+      <span
+        className={cn(
+          'w-8 h-8 rounded-[10px] flex items-center justify-center shrink-0',
+          isSelected ? opt.selIconBg : opt.iconBg
+        )}
+      >
+        <opt.Icon
+          className={cn(
+            'w-3.5 h-3.5',
+            isSelected ? opt.selIconStroke : opt.iconStroke
+          )}
+        />
+      </span>
+
+      {/* Text */}
+      <div className="flex-1 min-w-0">
+        <p
+          className={cn(
+            'text-[12px] font-bold tracking-tight mb-0.5',
+            isSelected ? opt.selTitleColor : opt.titleColor
+          )}
+        >
+          {opt.label}
+        </p>
+        <p
+          className={cn(
+            'text-[10px] leading-snug',
+            isSelected ? opt.selDescColor : opt.descColor
+          )}
+        >
+          {opt.description}
+        </p>
+      </div>
+
+      {/* Badge */}
+      <span
+        className={cn(
+          'shrink-0 text-[7px] font-bold tracking-[.05em] px-1 py-px rounded-[4px] border',
+          isSelected
+            ? cn(opt.selBadgeColor, opt.selBadgeBorder, opt.selBadgeBg)
+            : cn(opt.badgeColor, opt.badgeBorder, opt.badgeBg)
+        )}
+      >
+        {opt.badgeLabel}
+      </span>
+
+      {/* Right indicator */}
+      {showCheck && (
+        <span
+          className={cn(
+            'w-[14px] h-[14px] rounded-full flex items-center justify-center shrink-0',
+            opt.selCheckBg
+          )}
+        >
+          <IconCheck className={cn('w-[8px] h-[8px]', opt.selCheckStroke)} />
+        </span>
+      )}
+      {showChevron && (
+        <span
+          className={cn(
+            'w-[14px] h-[14px] flex items-center justify-center shrink-0',
+            opt.selCheckBg
+          )}
+        >
+          <IconChevronDown
+            className={cn('w-[10px] h-[10px] rotate-180', opt.selCheckStroke)}
+          />
+        </span>
+      )}
+      {!showCheck && !showChevron && (
+        <span className="w-[14px] h-[14px] shrink-0" />
+      )}
+    </div>
+  );
+
   return (
-    <div className={cn('space-y-[7px]', className)}>
-      {options.map((opt) => {
-        const isSel = value === opt.value;
+    <div className={cn('relative', className)} ref={containerRef}>
+      {/* Trigger card */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={popoverOpen}
+        onClick={() => {
+          if (!disabled) setPopoverOpen((prev) => !prev);
+        }}
+        className="active:scale-[0.98] transition-transform duration-150 cursor-pointer select-none"
+      >
+        {cardContent(selected, true, !popoverOpen, popoverOpen)}
+      </div>
 
-        // While collapsed hide all non-selected cards
-        if (collapsed && !isSel) return null;
-
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            disabled={disabled}
-            onClick={() => handleCardClick(opt.value)}
-            /**
-             * Battery-friendly animation:
-             * Only opacity + transform (compositor-only properties).
-             * duration-150 keeps it snappy.
-             */
-            className={cn(
-              'w-full flex items-center gap-3 px-[13px] py-3 rounded-[13px] border text-left',
-              'transition-[opacity,transform] duration-150 ease-out',
-              'active:scale-[0.98]',
-              'focus:outline-none focus-visible:ring-2 focus-visible:ring-black/10',
-              'disabled:opacity-40 disabled:cursor-not-allowed',
-              isSel
-                ? cn(opt.selCardBg, opt.selCardBorder, opt.selCardGlow)
-                : cn(opt.cardBg, opt.cardBorder)
-            )}
-          >
-            {/* Icon box */}
-            <span
-              className={cn(
-                'w-10 h-10 rounded-[10px] flex items-center justify-center shrink-0',
-                isSel ? opt.selIconBg : opt.iconBg
-              )}
-              aria-hidden="true"
+      {/* Popover (only other options) */}
+      {popoverOpen && (
+        <div
+          className={cn(
+            'absolute left-0 right-0 mt-1 z-50',
+            'bg-white/10 backdrop-blur-md rounded-[14px] border border-white/20',
+            'p-[5px] space-y-[5px]',
+            'shadow-[0_12px_40px_rgba(0,0,0,0.3)]',
+            'animate-in fade-in-0 zoom-in-95 origin-top'
+          )}
+        >
+          {others.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              disabled={disabled}
+              onClick={() => handleSelect(opt.value)}
+              className="w-full active:scale-[0.98] transition-transform duration-150 cursor-pointer"
             >
-              <opt.Icon
-                className={cn(
-                  'w-[17px] h-[17px]',
-                  isSel ? opt.selIconStroke : opt.iconStroke
-                )}
-              />
-            </span>
+              {cardContent(opt, false, false, false)}
+            </button>
+          ))}
+        </div>
+      )}
 
-            {/* Text */}
-            <div className="flex-1 min-w-0">
-              <p
-                className={cn(
-                  'text-[13px] font-bold tracking-tight mb-0.5',
-                  isSel ? opt.selTitleColor : opt.titleColor
-                )}
-              >
-                {opt.label}
-              </p>
-              <p
-                className={cn(
-                  'text-[11px] leading-snug',
-                  isSel ? opt.selDescColor : opt.descColor
-                )}
-              >
-                {opt.description}
-              </p>
-            </div>
-
-            {/* Badge */}
-            <span
-              className={cn(
-                'shrink-0 text-[9px] font-bold tracking-[.07em] px-[6px] py-[3px] rounded-[5px] border',
-                isSel
-                  ? cn(opt.selBadgeColor, opt.selBadgeBorder, opt.selBadgeBg)
-                  : cn(opt.badgeColor, opt.badgeBorder, opt.badgeBg)
-              )}
-            >
-              {opt.badgeLabel}
-            </span>
-
-            {/* Check indicator (selected only) */}
-            {isSel && (
-              <span
-                className={cn(
-                  'w-[18px] h-[18px] rounded-full flex items-center justify-center shrink-0',
-                  opt.selCheckBg
-                )}
-              >
-                <IconCheck
-                  className={cn('w-[10px] h-[10px]', opt.selCheckStroke)}
-                />
-              </span>
-            )}
-          </button>
-        );
-      })}
-
-      {/* Hint shown only when collapsed and something is selected */}
-      {collapsed && value && (
+      {/* Hint */}
+      {!popoverOpen && (
         <p className="text-center text-[10px] text-black/20 pt-1 tracking-[.04em] select-none">
           tap to change
         </p>
