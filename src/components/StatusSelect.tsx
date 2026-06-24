@@ -64,7 +64,7 @@ const IconChevronDown = ({ className }: { className?: string }) => (
   </Svg>
 );
 
-// ─── Options (complete array) ─────────────────────────────────
+// ─── Options (unchanged) ─────────────────────────────────────
 
 export const STATUS_OPTIONS = [
   {
@@ -209,7 +209,7 @@ export const STATUS_OPTIONS = [
   },
 ];
 
-// ─── Component ─────────────────────────────────────────────────
+// ─── Component (updated) ─────────────────────────────────────
 
 interface StatusSelectProps {
   value: string;
@@ -259,9 +259,66 @@ const StatusSelect: React.FC<StatusSelectProps> = ({
     setPopoverOpen(false);
   };
 
-  if (!selected) return null;
+  // If the current status is not in our options (e.g., "Fresh"), show all options as a list
+  if (!selected) {
+    return (
+      <div className={cn('space-y-[5px]', className)}>
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            disabled={disabled}
+            onClick={() => handleSelect(opt.value)}
+            className={cn(
+              'w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-[13px] border text-left',
+              'transition-[opacity,transform] duration-150 ease-out',
+              'active:scale-[0.98]',
+              opt.cardBg,
+              opt.cardBorder
+            )}
+          >
+            {/* Icon */}
+            <span
+              className={cn(
+                'w-8 h-8 rounded-[10px] flex items-center justify-center shrink-0',
+                opt.iconBg
+              )}
+            >
+              <opt.Icon className={cn('w-3.5 h-3.5', opt.iconStroke)} />
+            </span>
 
-  // Compact card renderer (height reduced)
+            {/* Text */}
+            <div className="flex-1 min-w-0">
+              <p className={cn('text-[12px] font-bold tracking-tight mb-0.5', opt.titleColor)}>
+                {opt.label}
+              </p>
+              <p className={cn('text-[10px] leading-snug', opt.descColor)}>
+                {opt.description}
+              </p>
+            </div>
+
+            {/* Badge */}
+            <span
+              className={cn(
+                'shrink-0 text-[7px] font-bold tracking-[.05em] px-1 py-px rounded-[4px] border',
+                opt.badgeColor,
+                opt.badgeBorder,
+                opt.badgeBg
+              )}
+            >
+              {opt.badgeLabel}
+            </span>
+
+            {/* Empty spacer (since no right icon needed) */}
+            <span className="w-[14px] h-[14px] shrink-0" />
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  // ─── Selected status exists: show trigger card + popover ────────
+
   const cardContent = (
     opt: any,
     isSelected: boolean,
