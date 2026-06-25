@@ -17,38 +17,42 @@ import { Plus, Trash2, Edit, Download, IndianRupee, AlertTriangle, Receipt } fro
 import * as XLSX from 'xlsx';
 import { cn } from '@/lib/utils';
 
-// ── Same categories as Office Expenses ───────────────────────────────────────
+// ── Employee-specific categories ─────────────────────────────────────────────
 const EXPENSE_CATS = [
   'tea_refreshments',
   'stationary',
   'travel',
   'food',
   'internet',
-  'printing',
-  'miscellaneous',
   'other',
 ] as const;
 
 const CAT_LABELS: Record<string, string> = {
   tea_refreshments: '☕ Tea & Refreshments',
   stationary:       '📝 Stationary',
-  travel:           '🚗 Travel',
-  food:             '🍱 Food',
-  internet:         '📶 Internet / Data',
-  printing:         '🖨️ Printing',
-  miscellaneous:    '📦 Miscellaneous',
+  travel:           '🚌 Customer Bill Payment',
+  food:             '💸 Amt Transfer Customer',
+  internet:         '📶 Self Recharge',
   other:            '➕ Other',
 };
 
 const CAT_ICONS: Record<string, string> = {
   tea_refreshments: '☕',
   stationary:       '📝',
-  travel:           '🚗',
-  food:             '🍱',
+  travel:           '🚌',
+  food:             '💸',
   internet:         '📶',
-  printing:         '🖨️',
-  miscellaneous:    '📦',
   other:            '➕',
+};
+
+// Light pastel chip colors per category
+const CAT_CHIP_COLORS: Record<string, string> = {
+  tea_refreshments: 'border-amber-200   bg-amber-50   text-amber-700   data-[sel=true]:border-amber-400   data-[sel=true]:bg-amber-100   data-[sel=true]:text-amber-800',
+  stationary:       'border-sky-200     bg-sky-50     text-sky-700     data-[sel=true]:border-sky-400     data-[sel=true]:bg-sky-100     data-[sel=true]:text-sky-800',
+  travel:           'border-violet-200  bg-violet-50  text-violet-700  data-[sel=true]:border-violet-400  data-[sel=true]:bg-violet-100  data-[sel=true]:text-violet-800',
+  food:             'border-green-200   bg-green-50   text-green-700   data-[sel=true]:border-green-400   data-[sel=true]:bg-green-100   data-[sel=true]:text-green-800',
+  internet:         'border-blue-200    bg-blue-50    text-blue-700    data-[sel=true]:border-blue-400    data-[sel=true]:bg-blue-100    data-[sel=true]:text-blue-800',
+  other:            'border-rose-200    bg-rose-50    text-rose-700    data-[sel=true]:border-rose-400    data-[sel=true]:bg-rose-100    data-[sel=true]:text-rose-800',
 };
 
 const STATUS_STYLES: Record<string, string> = {
@@ -489,10 +493,10 @@ const EmployeeExpensesPage: React.FC = () => {
                     type="button"
                     onClick={() => setForm(p => ({ ...p, category: cat }))}
                     className={cn(
-                      'flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 text-left text-xs font-medium transition-all',
+                      'flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 text-left text-xs font-semibold transition-all',
                       form.category === cat
-                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
-                        : 'border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:border-slate-300'
+                        ? [CAT_CHIP_COLORS[cat], 'ring-2 ring-offset-1 ring-current shadow-sm scale-[1.02]'].join(' ')
+                        : [CAT_CHIP_COLORS[cat], 'opacity-70 hover:opacity-100 hover:scale-[1.01]'].join(' ')
                     )}
                   >
                     <span className="text-base shrink-0">{CAT_ICONS[cat]}</span>
