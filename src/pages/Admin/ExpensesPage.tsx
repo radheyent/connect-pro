@@ -23,6 +23,13 @@ const CAT_LABELS: Record<string,string> = {
   tea_refreshments:'Tea & Refreshments', stationary:'Stationary', rent:'Rent',
   electricity:'Electricity', internet:'Internet', salary:'Salary',
   miscellaneous:'Miscellaneous', other:'Other',
+  travel:'Travel', food:'Food', printing:'Printing',
+};
+
+const CAT_ICONS: Record<string,string> = {
+  tea_refreshments:'☕', stationary:'📝', travel:'🚗', food:'🍱',
+  internet:'📶', printing:'🖨️', miscellaneous:'📦', other:'➕',
+  rent:'🏠', electricity:'⚡', salary:'💰',
 };
 
 const EMPTY_OFFICE_FORM = {
@@ -63,6 +70,7 @@ const ExpensesPage: React.FC = () => {
 
   // Data
   const [fieldExp,  setFieldExp]  = useState<any[]>([]);
+  const [empExp,    setEmpExp]    = useState<any[]>([]); // employee_expenses
   const [officeExp, setOfficeExp] = useState<any[]>([]);
   const [empMap,    setEmpMap]    = useState<Record<string,string>>({});
   const [leadMap,   setLeadMap]   = useState<Record<string,string>>({});
@@ -95,13 +103,14 @@ const ExpensesPage: React.FC = () => {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [feRes, oeRes, upRes, setRes, budgetRes] = await Promise.all([
+      const [feRes, oeRes, upRes, setRes, budgetRes, eeRes] = await Promise.all([
         supabase.from('field_expenses').select('*').order('expense_date', { ascending: false }),
         supabase.from('office_expenses').select('*').order('expense_date', { ascending: false }),
         supabase.from('user_profiles').select('id,name').eq('is_active', true),
         supabase.from('app_settings').select('value').eq('key','km_rate_per_km').single(),
         // Try to fetch budgets — table may not exist yet, silently handle
-        supabase.from('expense_budgets').select('*').throwOnError(false),
+        supabase.from('expense_budgets').select('*'),
+        supabase.from('employee_expenses').select('*').order('expense_date', { ascending: false }),
       ]);
 
       const em: Record<string,string> = {};
@@ -118,6 +127,7 @@ const ExpensesPage: React.FC = () => {
       setLeadMap(lm);
 
       setFieldExp(feRes.data || []);
+      setEmpExp(eeRes.data || []);
       setOfficeExp(oeRes.data || []);
 
       const rate = parseFloat(setRes.data?.value || '5') || 5;
@@ -148,7 +158,10 @@ const ExpensesPage: React.FC = () => {
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   // ── Pending count ──────────────────────────────────────────────────────────
-  const pendingCount = useMemo(() => fieldExp.filter(e => e.status === 'pending').length, [fieldExp]);
+  const pendingCount = useMemo(() =>
+    fieldExp.filter(e => e.status === 'pending').length +
+    empExp.filter(e => e.status === 'pending').length,
+    [fieldExp, empExp]);
 
   // ── Month summaries ────────────────────────────────────────────────────────
   const thisMonth = new Date().toISOString().slice(0, 7);
@@ -156,14 +169,16 @@ const ExpensesPage: React.FC = () => {
   const computeSummary = useCallback((month: string) => {
     const af = fieldExp.filter(e => e.status === 'approved' && e.expense_date?.startsWith(month));
     const oe = officeExp.filter(e => e.expense_date?.startsWith(month));
+    const ae = empExp.filter(e => e.status === 'approved' && e.expense_date?.startsWith(month));
     const fieldConv = af.reduce((s,e) => s + (Number(e.conveyance_amount)||0), 0);
     const credit    = af.reduce((s,e) => s + (Number(e.credit_total)||0), 0);
     const km        = af.reduce((s,e) => s + (Number(e.kilometres)||0), 0);
     const office    = oe.reduce((s,e) => s + (Number(e.amount)||0), 0);
-    const totalExpense = fieldConv + office;
+    const empTotal  = ae.reduce((s,e) => s + (Number(e.amount)||0), 0);
+    const totalExpense = fieldConv + office + empTotal;
     const profit = credit - totalExpense;
-    return { fieldConv, credit, km, office, net: totalExpense - credit, totalExpense, profit };
-  }, [fieldExp, officeExp]);
+    return { fieldConv, credit, km, office: office + empTotal, net: totalExpense - credit, totalExpense, profit };
+  }, [fieldExp, officeExp, empExp]);
 
   const summary      = useMemo(() => computeSummary(thisMonth), [computeSummary, thisMonth]);
   const monthSummary = useMemo(() => computeSummary(monthView), [computeSummary, monthView]);
@@ -172,9 +187,10 @@ const ExpensesPage: React.FC = () => {
     const months = new Set([
       ...fieldExp.map(e => e.expense_date?.slice(0,7)).filter(Boolean),
       ...officeExp.map(e => e.expense_date?.slice(0,7)).filter(Boolean),
+      ...empExp.map(e => e.expense_date?.slice(0,7)).filter(Boolean),
     ]);
     return [...months].sort().reverse();
-  }, [fieldExp, officeExp]);
+  }, [fieldExp, officeExp, empExp]);
 
   const filteredField = useMemo(() => fieldExp.filter(e => {
     if (empFilter !== 'all' && e.field_boy_id !== empFilter) return false;
@@ -205,6 +221,17 @@ const ExpensesPage: React.FC = () => {
         expense: Number(e.amount)||0,
         credit: 0,
       })),
+      ...empExp
+        .filter(e => e.status === 'approved')
+        .map(e => ({
+          date: e.expense_date,
+          source: 'Employee',
+          person: empMap[e.user_id] || '—',
+          desc: `${CAT_LABELS[e.category] || e.custom_category || e.category} — ${e.description}`,
+          km: 0,
+          expense: Number(e.amount)||0,
+          credit: 0,
+        })),
     ].sort((a,b) => (a.date < b.date ? 1 : -1));
 
     let running = 0;
@@ -213,7 +240,7 @@ const ExpensesPage: React.FC = () => {
       running += net;
       return { ...r, net, running };
     });
-  }, [fieldExp, officeExp, empMap, leadMap]);
+  }, [fieldExp, officeExp, empExp, empMap, leadMap]);
 
   // ── Per-employee budget usage this month ───────────────────────────────────
   const empBudgetUsage = useMemo(() => {
@@ -260,9 +287,9 @@ const ExpensesPage: React.FC = () => {
   };
 
   // ── Approve ────────────────────────────────────────────────────────────────
-  const handleApprove = async (id: string) => {
+  const handleApprove = async (id: string, sourceTable: string = 'field_expenses') => {
     try {
-      const { error } = await supabase.from('field_expenses').update({
+      const { error } = await supabase.from(sourceTable).update({
         status: 'approved',
         approved_by: user!.id,
         approved_at: new Date().toISOString(),
@@ -275,8 +302,9 @@ const ExpensesPage: React.FC = () => {
 
   const handleReject = async () => {
     if (!rejectTarget || !rejectComment.trim()) { toast.error('Enter a reason'); return; }
+    const sourceTable = rejectTarget.sourceTable || 'field_expenses';
     try {
-      const { error } = await supabase.from('field_expenses').update({
+      const { error } = await supabase.from(sourceTable).update({
         status: 'rejected',
         admin_comment: rejectComment.trim(),
       }).eq('id', rejectTarget.id);
@@ -389,7 +417,7 @@ const ExpensesPage: React.FC = () => {
   };
 
   // ── FieldExpRow ────────────────────────────────────────────────────────────
-  const FieldRow = ({ exp, showActions = true }: { exp: any; showActions?: boolean }) => {
+  const FieldRow = ({ exp, showActions = true }: { exp: any; showActions?: boolean; key?: any }) => {
     const budget = budgets[exp.field_boy_id];
     const used   = empBudgetUsage[exp.field_boy_id] || 0;
     const overBudget = budget && used > budget.monthly_limit;
@@ -604,19 +632,79 @@ const ExpensesPage: React.FC = () => {
       )}
 
       {/* ── PENDING ── */}
-      {!loading && tab === 'Pending' && (
-        <div className="space-y-2">
-          {fieldExp.filter(e => e.status === 'pending').length === 0 ? (
-            <div className="py-16 text-center text-slate-400">No pending approvals 🎉</div>
-          ) : (
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
-              {fieldExp.filter(e => e.status === 'pending').map(exp => (
-                <FieldRow key={exp.id} exp={exp} />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {!loading && tab === 'Pending' && (() => {
+        const pendingField = fieldExp.filter(e => e.status === 'pending');
+        const pendingEmp   = empExp.filter(e => e.status === 'pending');
+        const total = pendingField.length + pendingEmp.length;
+        return (
+          <div className="space-y-4">
+            {total === 0 ? (
+              <div className="py-16 text-center text-slate-400">No pending approvals 🎉</div>
+            ) : (
+              <>
+                {/* Employee (office staff) pending */}
+                {pendingEmp.length > 0 && (
+                  <div>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-1">
+                      👔 Employee Expenses ({pendingEmp.length})
+                    </p>
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
+                      {pendingEmp.map(exp => (
+                        <div key={exp.id} className="p-4 flex items-start gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center text-lg shrink-0">
+                            {CAT_ICONS[exp.category] || '📋'}
+                          </div>
+                          <div className="flex-1 min-w-0 space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold text-sm text-slate-900 dark:text-white">
+                                {empMap[exp.user_id] || '—'}
+                              </span>
+                              <span className="text-xs text-slate-400">·</span>
+                              <span className="text-xs text-slate-600 dark:text-slate-300">
+                                {CAT_LABELS[exp.category] || exp.custom_category || exp.category}
+                              </span>
+                              <StatusBadge s={exp.status} />
+                            </div>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">{exp.description}</p>
+                            <div className="flex gap-3 text-xs">
+                              <span className="text-slate-400">{exp.expense_date}</span>
+                              <span className="text-orange-600 font-bold">₹{exp.amount}</span>
+                            </div>
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700"
+                              onClick={() => handleApprove(exp.id, 'employee_expenses')}>✅</Button>
+                            <Button size="sm" variant="outline" className="h-7 text-xs text-red-500 border-red-200"
+                              onClick={() => { setRejectTarget({ ...exp, sourceTable: 'employee_expenses' }); setRejectComment(''); }}>❌</Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400"
+                              onClick={() => setDeleteTarget({ id: exp.id, table: 'employee_expenses', name: `${empMap[exp.user_id] || 'Employee'} expense` })}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Field Boy pending */}
+                {pendingField.length > 0 && (
+                  <div>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-1">
+                      🚗 Field Boy Expenses ({pendingField.length})
+                    </p>
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
+                      {pendingField.map(exp => (
+                        <FieldRow key={exp.id} exp={exp} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── FIELD EXPENSES ── */}
       {!loading && tab === 'Field Expenses' && (
@@ -649,44 +737,102 @@ const ExpensesPage: React.FC = () => {
 
       {/* ── OFFICE EXPENSES ── */}
       {!loading && tab === 'Office Expenses' && (
-        <div className="space-y-3">
-          <Button size="sm" onClick={() => { setEditOfficeId(null); setOfficeForm(EMPTY_OFFICE_FORM); setIsOfficeOpen(true); }}>
-            <Plus className="h-4 w-4 mr-1" />Add Office Expense
-          </Button>
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
-            {officeExp.length === 0
-              ? <div className="py-12 text-center text-slate-400">No office expenses yet</div>
-              : officeExp.map(exp => (
-                <div key={exp.id} className="p-4 flex items-center gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-sm">{CAT_LABELS[exp.category] || exp.custom_category || exp.category}</span>
-                      <span className="text-orange-600 font-bold text-sm">₹{exp.amount}</span>
+        <div className="space-y-5">
+
+          {/* Admin-added Office Expenses */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">🏢 Office Expenses (Admin Added)</p>
+              <Button size="sm" onClick={() => { setEditOfficeId(null); setOfficeForm(EMPTY_OFFICE_FORM); setIsOfficeOpen(true); }}>
+                <Plus className="h-4 w-4 mr-1" />Add
+              </Button>
+            </div>
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
+              {officeExp.length === 0
+                ? <div className="py-8 text-center text-slate-400 text-sm">No office expenses yet</div>
+                : officeExp.map(exp => (
+                  <div key={exp.id} className="p-4 flex items-center gap-4">
+                    <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-lg shrink-0">
+                      {CAT_ICONS[exp.category] || '📋'}
                     </div>
-                    <p className="text-xs text-slate-500 mt-0.5">{exp.description} · {exp.expense_date} · {empMap[exp.added_by] || '—'}</p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm">{CAT_LABELS[exp.category] || exp.custom_category || exp.category}</span>
+                        <span className="text-orange-600 font-bold text-sm">₹{exp.amount}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">{exp.description} · {exp.expense_date} · {empMap[exp.added_by] || '—'}</p>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
+                        setEditOfficeId(exp.id);
+                        setOfficeForm({
+                          category: exp.category,
+                          custom_category: exp.custom_category || '',
+                          amount: String(exp.amount),
+                          description: exp.description,
+                          expense_date: exp.expense_date,
+                        });
+                        setIsOfficeOpen(true);
+                      }}>
+                        <Edit className="h-3.5 w-3.5 text-slate-500" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400"
+                        onClick={() => setDeleteTarget({ id: exp.id, table: 'office_expenses', name: 'office expense' })}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex gap-1 shrink-0">
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
-                      setEditOfficeId(exp.id);
-                      setOfficeForm({
-                        category: exp.category,
-                        custom_category: exp.custom_category || '',
-                        amount: String(exp.amount),
-                        description: exp.description,
-                        expense_date: exp.expense_date,
-                      });
-                      setIsOfficeOpen(true);
-                    }}>
-                      <Edit className="h-3.5 w-3.5 text-slate-500" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400"
-                      onClick={() => setDeleteTarget({ id: exp.id, table: 'office_expenses', name: 'office expense' })}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                ))
+              }
+            </div>
+          </div>
+
+          {/* Employee submitted expenses — all statuses */}
+          <div className="space-y-3">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">👔 Employee Submitted Expenses</p>
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
+              {empExp.length === 0
+                ? <div className="py-8 text-center text-slate-400 text-sm">No employee expenses yet</div>
+                : empExp.map(exp => (
+                  <div key={exp.id} className="p-4 flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center text-lg shrink-0">
+                      {CAT_ICONS[exp.category] || '📋'}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm text-slate-900 dark:text-white">{empMap[exp.user_id] || '—'}</span>
+                        <span className="text-xs text-slate-500">{CAT_LABELS[exp.category] || exp.custom_category || exp.category}</span>
+                        <StatusBadge s={exp.status} />
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{exp.description}</p>
+                      <div className="flex gap-3 text-xs">
+                        <span className="text-slate-400">{exp.expense_date}</span>
+                        <span className="text-orange-600 font-bold">₹{exp.amount}</span>
+                      </div>
+                      {exp.admin_comment && (
+                        <p className="text-xs text-red-600 bg-red-50 dark:bg-red-950/30 border border-red-200 rounded p-1.5 mt-1">
+                          💬 {exp.admin_comment}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      {exp.status === 'pending' && (
+                        <>
+                          <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700"
+                            onClick={() => handleApprove(exp.id, 'employee_expenses')}>✅</Button>
+                          <Button size="sm" variant="outline" className="h-7 text-xs text-red-500 border-red-200"
+                            onClick={() => { setRejectTarget({ ...exp, sourceTable: 'employee_expenses' }); setRejectComment(''); }}>❌</Button>
+                        </>
+                      )}
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400"
+                        onClick={() => setDeleteTarget({ id: exp.id, table: 'employee_expenses', name: `${empMap[exp.user_id] || 'Employee'} expense` })}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              ))
-            }
+                ))
+              }
+            </div>
           </div>
         </div>
       )}
@@ -709,7 +855,7 @@ const ExpensesPage: React.FC = () => {
                   <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
                     <td className="px-3 py-2 whitespace-nowrap text-slate-600">{r.date}</td>
                     <td className="px-3 py-2">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${r.source==='Field'?'bg-blue-100 text-blue-700':'bg-slate-100 text-slate-600'}`}>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${r.source==='Field'?'bg-blue-100 text-blue-700':r.source==='Employee'?'bg-violet-100 text-violet-700':'bg-slate-100 text-slate-600'}`}>
                         {r.source}
                       </span>
                     </td>
