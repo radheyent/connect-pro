@@ -330,17 +330,17 @@ const ExpensesPage: React.FC = () => {
         expense: 0,
         credit:  Number(e.amount)||0,
       })),
-    ].sort((a,b) => (a.date < b.date ? 1 : -1));
+    ].sort((a,b) => (a.date < b.date ? -1 : 1)); // asc: oldest first → correct running balance
 
-    // running balance: starts at 0
-    // positive running = we are in profit (received more than spent)
-    // negative running = we are in loss (spent more than received)
+    // Calculate oldest→newest so final row = true cumulative total
     let running = 0;
-    return rows.map(r => {
-      const net = r.credit - r.expense; // credit=positive contribution, expense=negative
+    const withBalance = rows.map(r => {
+      const net = r.credit - r.expense;
       running += net;
       return { ...r, net, running } as LedgerRow;
     });
+    // Reverse for UI: show newest first (standard ledger view)
+    return withBalance.reverse();
   }, [fieldExp, officeExp, empExp, adminCredits, empMap, leadMap]);
 
   // ── Per-employee budget usage this month (field + employee expenses) ───────
@@ -564,11 +564,34 @@ const ExpensesPage: React.FC = () => {
       Reference: e.reference || '',
       'Added By': empMap[e.added_by] || e.added_by,
     }));
+    const ee = empExp.map(e => ({
+      Date: e.expense_date,
+      Employee: empMap[e.user_id] || e.user_id,
+      Category: CAT_LABELS[e.category] || e.custom_category || e.category,
+      'Amount (Expense) ₹': `-${e.amount}`,
+      Description: e.description,
+      Status: e.status,
+      'Admin Comment': e.admin_comment || '',
+    }));
+    const ledgerAsc = ledger.slice().reverse();
+    let runBal = 0;
+    const ledgerExport = ledgerAsc.map(r => {
+      runBal += r.net;
+      return {
+        Date: r.date, Source: r.source, Person: r.person, Description: r.desc,
+        'Expense ₹':  r.expense > 0 ? `-${r.expense.toFixed(0)}` : '',
+        'Credit ₹':   r.credit  > 0 ? `+${r.credit.toFixed(0)}`  : '',
+        'Line P&L ₹': r.net >= 0    ? `+${r.net.toFixed(0)}`     : `${r.net.toFixed(0)}`,
+        'Balance ₹':  runBal >= 0   ? `+${runBal.toFixed(0)}`    : `${runBal.toFixed(0)}`,
+      };
+    });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(fe.length ? fe : [{ info: 'No data' }]), 'Field Expenses');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(oe.length ? oe : [{ info: 'No data' }]), 'Office Expenses');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ee.length ? ee : [{ info: 'No data' }]), 'Employee Expenses');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ac.length ? ac : [{ info: 'No data' }]), 'Admin Credits');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ledgerExport.length ? ledgerExport : [{ info: 'No data' }]), 'Ledger');
     XLSX.writeFile(wb, `Expenses_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
-    toast.success('Excel downloaded');
+    toast.success('Excel downloaded (5 sheets)');
   };
 
   // ── FieldExpRow ────────────────────────────────────────────────────────────
@@ -956,7 +979,23 @@ const ExpensesPage: React.FC = () => {
               <Button size="sm" variant="ghost" className="h-8 text-xs text-slate-400"
                 onClick={() => { setDateFrom(''); setDateTo(''); setEmpFilter('all'); }}>Clear</Button>
             )}
-            <span className="text-xs text-slate-400 ml-auto">{filteredField.length} entries</span>
+            <div className="ml-auto flex items-center gap-3 text-xs">
+              <span className="text-slate-400">{filteredField.length} entries</span>
+              {filteredField.length > 0 && (() => {
+                const fExp = filteredField.reduce((s,e) => s + (Number(e.conveyance_amount)||0), 0);
+                const fCr  = filteredField.filter(e => e.status === 'approved').reduce((s,e) => s + (Number(e.credit_total)||0), 0);
+                const fNet = fCr - fExp;
+                return (
+                  <>
+                    <span className="text-red-600 font-bold">-₹{fExp.toFixed(0)}</span>
+                    <span className="text-green-600 font-bold">+₹{fCr.toFixed(0)}</span>
+                    <span className={`font-black ${fNet >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {fNet >= 0 ? '+' : '-'}₹{Math.abs(fNet).toFixed(0)}
+                    </span>
+                  </>
+                );
+              })()}
+            </div>
           </div>
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
             {filteredField.length === 0
@@ -1017,6 +1056,29 @@ const ExpensesPage: React.FC = () => {
               }
             </div>
           </div>
+
+          {/* Office + Employee totals summary */}
+          {(officeExp.length > 0 || empExp.length > 0) && (() => {
+            const officeTotal = officeExp.reduce((s,e) => s + (Number(e.amount)||0), 0);
+            const empApproved = empExp.filter(e => e.status === 'approved').reduce((s,e) => s + (Number(e.amount)||0), 0);
+            const empPending  = empExp.filter(e => e.status === 'pending').reduce((s,e) => s + (Number(e.amount)||0), 0);
+            return (
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-xl p-3 text-center">
+                  <p className="text-[10px] font-bold text-red-400 uppercase tracking-wider">Office Total</p>
+                  <p className="text-lg font-black text-red-600">-₹{officeTotal.toFixed(0)}</p>
+                </div>
+                <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-xl p-3 text-center">
+                  <p className="text-[10px] font-bold text-red-400 uppercase tracking-wider">Emp Approved</p>
+                  <p className="text-lg font-black text-red-600">-₹{empApproved.toFixed(0)}</p>
+                </div>
+                <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 text-center">
+                  <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Emp Pending</p>
+                  <p className="text-lg font-black text-amber-600">₹{empPending.toFixed(0)}</p>
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="space-y-3">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">👔 Employee Submitted Expenses</p>
@@ -1085,10 +1147,22 @@ const ExpensesPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-              💰 Credits Added ({adminCredits.length})
-            </p>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                💰 Credits Added ({adminCredits.length})
+              </p>
+              {adminCredits.length > 0 && (() => {
+                const monthTotal = adminCredits.filter(c => c.credit_date?.startsWith(thisMonth)).reduce((s,c) => s + (Number(c.amount)||0), 0);
+                const allTotal   = adminCredits.reduce((s,c) => s + (Number(c.amount)||0), 0);
+                return (
+                  <div className="flex gap-3 mt-0.5">
+                    <span className="text-xs text-green-600 font-bold">This month: +₹{monthTotal.toFixed(0)}</span>
+                    <span className="text-xs text-slate-400">All time: +₹{allTotal.toFixed(0)}</span>
+                  </div>
+                );
+              })()}
+            </div>
             <Button size="sm" onClick={() => { setEditCreditId(null); setCreditForm(EMPTY_CREDIT_FORM); setIsCreditOpen(true); }}>
               <Plus className="h-4 w-4 mr-1" />Add Credit
             </Button>
@@ -1143,13 +1217,17 @@ const ExpensesPage: React.FC = () => {
       )}
 
       {/* ── LEDGER ── */}
-      {!loading && tab === 'Ledger' && (
+      {!loading && tab === 'Ledger' && (() => {
+        const filteredLedger = ledger; // All entries — month filtering via allMonths select
+        return (
         <div className="space-y-3">
-          {/* Legend */}
-          <div className="flex gap-4 text-xs flex-wrap px-1">
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>Expense (always negative)</span>
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block"></span>Credit (always positive)</span>
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span>Balance (running total)</span>
+          {/* Filter + Legend */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex gap-3 text-xs flex-1 flex-wrap">
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>Expense</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500 inline-block"></span>Credit</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-500 inline-block"></span>Balance</span>
+            </div>
           </div>
 
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm overflow-x-auto">
@@ -1162,9 +1240,9 @@ const ExpensesPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                {ledger.length === 0
+                {filteredLedger.length === 0
                   ? <tr><td colSpan={9} className="py-12 text-center text-slate-400">No approved entries</td></tr>
-                  : ledger.map((r, i) => (
+                  : filteredLedger.map((r, i) => (
                     <tr key={i} className={`hover:bg-slate-50 dark:hover:bg-slate-700/50 ${r.source === 'Credit' ? 'bg-green-50/30 dark:bg-green-950/10' : ''}`}>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600">{r.date}</td>
                       <td className="px-3 py-2">
@@ -1206,17 +1284,19 @@ const ExpensesPage: React.FC = () => {
                   ))
                 }
               </tbody>
-              {ledger.length > 0 && (() => {
-                const last = ledger[ledger.length - 1];
+              {filteredLedger.length > 0 && (() => {
+                const last = filteredLedger[filteredLedger.length - 1];
+                const totExp = filteredLedger.reduce((s,r) => s + r.expense, 0);
+                const totCr  = filteredLedger.reduce((s,r) => s + r.credit, 0);
                 return (
                   <tfoot className="border-t-2 border-slate-300 bg-slate-100 dark:bg-slate-900">
                     <tr>
                       <td colSpan={5} className="px-3 py-2 font-bold text-xs">TOTALS</td>
                       <td className="px-3 py-2 font-black text-red-600 text-xs">
-                        {fmtExpense(ledger.reduce((s,r) => s + r.expense, 0))}
+                        {fmtExpense(totExp)}
                       </td>
                       <td className="px-3 py-2 font-black text-green-600 text-xs">
-                        {fmtCredit(ledger.reduce((s,r) => s + r.credit, 0))}
+                        {fmtCredit(totCr)}
                       </td>
                       <td className="px-3 py-2 text-xs"></td>
                       <td className={`px-3 py-2 font-black text-xs ${last.running >= 0 ? 'text-green-600' : 'text-red-500'}`}>
@@ -1230,7 +1310,8 @@ const ExpensesPage: React.FC = () => {
             </table>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ── BUDGET MANAGEMENT ── */}
       {!loading && tab === 'Budget' && (
