@@ -548,6 +548,7 @@ const ExpensesPage: React.FC = () => {
   const [fieldBulkErrors,    setFieldBulkErrors]    = useState<string[]>([]);
   const [fieldBulkUploading, setFieldBulkUploading] = useState(false);
   const [fieldBulkDone,      setFieldBulkDone]      = useState(false);
+  const [bulkSubTab,         setBulkSubTab]          = useState<'office'|'field'>('office');
 
   const CLOSURE_TYPES = ['sale', 'visit', 'ad-hoc', 'follow-up', 'other'];
 
@@ -1096,17 +1097,15 @@ const ExpensesPage: React.FC = () => {
       )}
 
       {/* ── BULK UPLOAD ── */}
-      {!loading && tab === 'Bulk Upload' && (() => {
-        const [bulkSubTab, setBulkSubTab] = React.useState<'office'|'field'>('office');
-        return (
+      {!loading && tab === 'Bulk Upload' && (
         <div className="space-y-5">
 
           {/* Sub-tab switcher */}
           <div className="flex gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl w-fit">
-            {[['office', '🏢 Office Expenses'], ['field', '🚗 Field Expenses']] .map(([key, label]) => (
-              <button key={key} onClick={() => setBulkSubTab(key as 'office' | 'field')}
+            {(['office', 'field'] as const).map(key => (
+              <button key={key} onClick={() => setBulkSubTab(key)}
                 className={cn('px-4 py-2 rounded-lg text-sm font-semibold transition-all', bulkSubTab === key ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300')}>
-                {label}
+                {key === 'office' ? '🏢 Office Expenses' : '🚗 Field Expenses'}
               </button>
             ))}
           </div>
@@ -1394,8 +1393,7 @@ const ExpensesPage: React.FC = () => {
           </> }
 
         </div>
-        );
-      })()}
+      )}
 
       {/* ── LEDGER ── */}
       {!loading && tab === 'Ledger' && (
