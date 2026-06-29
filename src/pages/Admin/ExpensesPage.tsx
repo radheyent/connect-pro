@@ -542,6 +542,138 @@ const ExpensesPage: React.FC = () => {
     setBulkDone(false);
   };
 
+  // ── Field Bulk Upload ─────────────────────────────────────────────────────
+  const [fieldBulkFile,      setFieldBulkFile]      = useState<File | null>(null);
+  const [fieldBulkRows,      setFieldBulkRows]      = useState<any[]>([]);
+  const [fieldBulkErrors,    setFieldBulkErrors]    = useState<string[]>([]);
+  const [fieldBulkUploading, setFieldBulkUploading] = useState(false);
+  const [fieldBulkDone,      setFieldBulkDone]      = useState(false);
+
+  const CLOSURE_TYPES = ['sale', 'visit', 'ad-hoc', 'follow-up', 'other'];
+
+  const handleFieldSampleDownload = () => {
+    const empNames = employees.map((e: any) => e.name);
+    const sample = [
+      { 'Date (YYYY-MM-DD)': '2026-06-01', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 12, 'Conveyance Rs': 60,  'Credit Rs': 500,  'Closure Type': 'sale',      Description: 'Sale at Sector 12' },
+      { 'Date (YYYY-MM-DD)': '2026-06-02', 'Employee Name': empNames[1] || 'Priya Singh',  KM: 8,  'Conveyance Rs': 40,  'Credit Rs': 0,    'Closure Type': 'visit',     Description: 'Customer visit' },
+      { 'Date (YYYY-MM-DD)': '2026-06-03', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 5,  'Conveyance Rs': 25,  'Credit Rs': 0,    'Closure Type': 'follow-up', Description: 'Follow-up' },
+      { 'Date (YYYY-MM-DD)': '2026-06-04', 'Employee Name': empNames[2] || 'Amit Sharma', KM: 20, 'Conveyance Rs': 100, 'Credit Rs': 1200, 'Closure Type': 'sale',      Description: 'Two SIMs sold' },
+      { 'Date (YYYY-MM-DD)': '2026-06-05', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 0,  'Conveyance Rs': 50,  'Credit Rs': 0,    'Closure Type': 'ad-hoc',   Description: 'Local travel' },
+    ];
+    const info = [
+      { Info: 'INSTRUCTIONS' },
+      { Info: 'Employee Name must match exactly as in system.' },
+      { Info: '' },
+      { Info: 'VALID CLOSURE TYPES:' },
+      ...CLOSURE_TYPES.map(t => ({ Info: t })),
+      { Info: '' },
+      { Info: 'YOUR REGISTERED EMPLOYEES:' },
+      ...empNames.map((n: string) => ({ Info: n })),
+      { Info: '' },
+      { Info: 'KM = kilometres (0 if none)' },
+      { Info: 'Conveyance Rs = travel amount (required)' },
+      { Info: 'Credit Rs = money collected from customer (0 if none)' },
+      { Info: 'Admin bulk entries are saved as APPROVED directly.' },
+    ];
+    const wb = XLSX.utils.book_new();
+    const ws1 = XLSX.utils.json_to_sheet(sample);
+    ws1['!cols'] = [{ wch: 20 }, { wch: 22 }, { wch: 6 }, { wch: 16 }, { wch: 12 }, { wch: 14 }, { wch: 35 }];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Field Expenses Upload');
+    const ws2 = XLSX.utils.json_to_sheet(info);
+    ws2['!cols'] = [{ wch: 55 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Instructions');
+    XLSX.writeFile(wb, 'BulkFieldExpense_Sample.xlsx');
+    toast.success('Field expense template downloaded');
+  };
+
+  const handleFieldBulkFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFieldBulkFile(file);
+    setFieldBulkRows([]);
+    setFieldBulkErrors([]);
+    setFieldBulkDone(false);
+
+    const nameToId: Record<string, string> = {};
+    employees.forEach((emp: any) => { nameToId[emp.name.trim().toLowerCase()] = emp.id; });
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb   = XLSX.read(ev.target?.result, { type: 'binary', cellDates: true });
+        const ws   = wb.Sheets[wb.SheetNames[0]];
+        const raw: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        const errors: string[] = [];
+        const parsed: any[] = [];
+
+        raw.forEach((row, i) => {
+          const rowNum  = i + 2;
+          const date    = String(row['Date (YYYY-MM-DD)'] || '').trim();
+          const empName = String(row['Employee Name']     || '').trim();
+          const km      = parseFloat(String(row['KM'] || '0').replace(/[,\s]/g, '')) || 0;
+          const conv    = parseFloat(String(row['Conveyance Rs'] || '').replace(/[^0-9.]/g, ''));
+          const credit  = parseFloat(String(row['Credit Rs']    || '0').replace(/[^0-9.]/g, '')) || 0;
+          const closure = String(row['Closure Type'] || '').trim().toLowerCase();
+          const desc    = String(row['Description']  || '').trim();
+
+          const rowErrors: string[] = [];
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date))   rowErrors.push('invalid date (use YYYY-MM-DD)');
+          const empId = nameToId[empName.toLowerCase()];
+          if (!empId)                                  rowErrors.push('employee not found: "' + empName + '"');
+          if (isNaN(conv) || conv <= 0)                rowErrors.push('invalid conveyance amount');
+          if (!CLOSURE_TYPES.includes(closure))        rowErrors.push('invalid closure type: "' + closure + '"');
+
+          if (rowErrors.length) {
+            errors.push('Row ' + rowNum + ': ' + rowErrors.join(', '));
+          } else {
+            parsed.push({ expense_date: date, field_boy_id: empId, employee_name: empName, kilometres: km, conveyance_amount: conv, credit_total: isNaN(credit) ? 0 : credit, closure_type: closure, description: desc || null });
+          }
+        });
+
+        setFieldBulkErrors(errors);
+        setFieldBulkRows(parsed);
+      } catch (err: any) {
+        setFieldBulkErrors(['Could not read file: ' + err.message]);
+        setFieldBulkRows([]);
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
+
+  const handleFieldBulkUpload = async () => {
+    if (!fieldBulkRows.length) return;
+    setFieldBulkUploading(true);
+    try {
+      const payload = fieldBulkRows.map(r => ({
+        expense_date: r.expense_date, field_boy_id: r.field_boy_id,
+        kilometres: r.kilometres, conveyance_amount: r.conveyance_amount,
+        credit_total: r.credit_total, closure_type: r.closure_type,
+        description: r.description, status: 'approved',
+        approved_by: user!.id, approved_at: new Date().toISOString(),
+      }));
+      const { error } = await supabase.from('field_expenses').insert(payload);
+      if (error) throw error;
+      toast.success(payload.length + ' field expenses uploaded & auto-approved!');
+      setFieldBulkDone(true);
+      setFieldBulkFile(null);
+      setFieldBulkRows([]);
+      setFieldBulkErrors([]);
+      fetchAll();
+    } catch (err: any) {
+      toast.error('Upload failed: ' + err.message);
+    } finally {
+      setFieldBulkUploading(false);
+    }
+  };
+
+  const handleFieldBulkReset = () => {
+    setFieldBulkFile(null);
+    setFieldBulkRows([]);
+    setFieldBulkErrors([]);
+    setFieldBulkDone(false);
+  };
+
   // ── FieldExpRow ────────────────────────────────────────────────────────────
   const FieldRow = ({ exp, showActions = true }: { exp: any; showActions?: boolean; key?: any }) => {
     const budget = budgets[exp.field_boy_id];
@@ -964,19 +1096,32 @@ const ExpensesPage: React.FC = () => {
       )}
 
       {/* ── BULK UPLOAD ── */}
-      {!loading && tab === 'Bulk Upload' && (
+      {!loading && tab === 'Bulk Upload' && (() => {
+        const [bulkSubTab, setBulkSubTab] = React.useState<'office'|'field'>('office');
+        return (
         <div className="space-y-5">
 
-          {/* Header info */}
+          {/* Sub-tab switcher */}
+          <div className="flex gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl w-fit">
+            {[['office', '🏢 Office Expenses'], ['field', '🚗 Field Expenses']] .map(([key, label]) => (
+              <button key={key} onClick={() => setBulkSubTab(key as 'office' | 'field')}
+                className={cn('px-4 py-2 rounded-lg text-sm font-semibold transition-all', bulkSubTab === key ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300')}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── OFFICE BULK ── */}
+          {bulkSubTab === 'office' && <>
           <div className="flex gap-3 p-4 rounded-xl border border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-900 text-xs text-blue-800 dark:text-blue-300">
             <FileUp className="h-5 w-5 shrink-0 mt-0.5 text-blue-500" />
             <div>
               <p className="font-bold text-sm mb-1">Bulk Upload Office Expenses</p>
               <ol className="list-decimal ml-4 space-y-0.5">
-                <li>Download the sample Excel template below</li>
+                <li>Download the sample Excel template</li>
                 <li>Fill your expense rows (keep column names exactly as-is)</li>
-                <li>Upload the filled file — rows will be validated before saving</li>
-                <li>Review the preview, then click <strong>Upload to Supabase</strong></li>
+                <li>Upload — rows validated before saving</li>
+                <li>Review preview, then click Upload to Supabase</li>
               </ol>
             </div>
           </div>
@@ -1121,8 +1266,136 @@ const ExpensesPage: React.FC = () => {
               <Button size="sm" variant="outline" className="ml-auto" onClick={handleBulkReset}>Upload More</Button>
             </div>
           )}
+          </> }
+
+          {/* ── FIELD BULK ── */}
+          {bulkSubTab === 'field' && <>
+          <div className="flex gap-3 p-4 rounded-xl border border-violet-200 bg-violet-50 dark:bg-violet-950/20 dark:border-violet-900 text-xs text-violet-800 dark:text-violet-300">
+            <FileUp className="h-5 w-5 shrink-0 mt-0.5 text-violet-500" />
+            <div>
+              <p className="font-bold text-sm mb-1">Bulk Upload Field Expenses</p>
+              <ol className="list-decimal ml-4 space-y-0.5">
+                <li>Download template — includes your registered employees list</li>
+                <li>Fill Date, Employee Name, KM, Conveyance, Credit, Closure Type</li>
+                <li>Upload — employee name matched to ID automatically</li>
+                <li>Entries saved as <strong>Approved</strong> directly (admin override)</li>
+              </ol>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-violet-600 text-white text-xs font-bold flex items-center justify-center">1</span>
+              <p className="font-semibold text-slate-800 dark:text-white text-sm">Download Field Template</p>
+            </div>
+            <div className="ml-8 space-y-2">
+              <p className="text-xs text-slate-500 dark:text-slate-400">7 columns: Date, Employee Name, KM, Conveyance Rs, Credit Rs, Closure Type, Description</p>
+              <div className="flex flex-wrap gap-1">
+                {["sale","visit","follow-up","ad-hoc","other"].map(t => (
+                  <span key={t} className="px-2 py-0.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 rounded text-[10px] font-mono">{t}</span>
+                ))}
+              </div>
+              <Button size="sm" onClick={handleFieldSampleDownload} className="bg-violet-600 hover:bg-violet-700 text-white mt-1">
+                <Download className="h-4 w-4 mr-1.5" />Download Field Template
+              </Button>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-violet-600 text-white text-xs font-bold flex items-center justify-center">2</span>
+              <p className="font-semibold text-slate-800 dark:text-white text-sm">Upload Filled Excel</p>
+            </div>
+            <div className="ml-8">
+              <label className={cn("flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer transition-colors", fieldBulkFile ? "border-violet-400 bg-violet-50 dark:bg-violet-950/20" : "border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800")}>
+                <div className="flex flex-col items-center gap-1.5 text-center">
+                  {fieldBulkFile ? (<>
+                    <CheckCircle2 className="h-7 w-7 text-violet-500" />
+                    <p className="text-sm font-semibold text-violet-700 dark:text-violet-400">{fieldBulkFile.name}</p>
+                    <p className="text-xs text-slate-500">{fieldBulkRows.length} valid rows · {fieldBulkErrors.length} errors</p>
+                  </>) : (<>
+                    <Upload className="h-7 w-7 text-slate-400" />
+                    <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">Click to select Excel file</p>
+                    <p className="text-xs text-slate-400">.xlsx or .xls supported</p>
+                  </>)}
+                </div>
+                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFieldBulkFilePick} />
+              </label>
+              {fieldBulkFile && <button onClick={handleFieldBulkReset} className="mt-2 text-xs text-slate-400 hover:text-red-500 underline">Clear and pick different file</button>}
+            </div>
+          </div>
+
+          {fieldBulkErrors.length > 0 && (
+            <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-xl p-4 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-bold text-red-700 dark:text-red-400">
+                <AlertCircle className="h-4 w-4" />{fieldBulkErrors.length} row{fieldBulkErrors.length > 1 ? "s" : ""} with errors (skipped)
+              </div>
+              <div className="space-y-0.5 max-h-36 overflow-y-auto">
+                {fieldBulkErrors.map((e, i) => <p key={i} className="text-xs text-red-600 dark:text-red-400 font-mono">{e}</p>)}
+              </div>
+            </div>
+          )}
+
+          {fieldBulkRows.length > 0 && (
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex-wrap gap-2">
+                <div>
+                  <p className="text-sm font-bold text-slate-800 dark:text-white">{fieldBulkRows.length} field entries ready</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Expense: −₹{fieldBulkRows.reduce((s,r) => s+r.conveyance_amount,0).toLocaleString("en-IN")} · Credit: +₹{fieldBulkRows.reduce((s,r) => s+r.credit_total,0).toLocaleString("en-IN")}
+                  </p>
+                </div>
+                <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={handleFieldBulkUpload} disabled={fieldBulkUploading || fieldBulkDone}>
+                  {fieldBulkUploading ? <><span className="animate-spin mr-1.5">⏳</span>Uploading…</> : fieldBulkDone ? <><CheckCircle2 className="h-4 w-4 mr-1.5" />Uploaded!</> : <><Upload className="h-4 w-4 mr-1.5" />Upload {fieldBulkRows.length} entries</>}
+                </Button>
+              </div>
+              <div className="overflow-x-auto max-h-72 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0">
+                    <tr>{["#","Date","Employee","KM","Conveyance","Credit","Closure","Description"].map(h => <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">{h}</th>)}</tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                    {fieldBulkRows.map((r,i) => (
+                      <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
+                        <td className="px-3 py-2 text-slate-400">{i+1}</td>
+                        <td className="px-3 py-2 font-medium">{r.expense_date}</td>
+                        <td className="px-3 py-2 font-semibold text-slate-800 dark:text-white">{r.employee_name}</td>
+                        <td className="px-3 py-2 text-blue-600">{r.kilometres > 0 ? r.kilometres : "—"}</td>
+                        <td className="px-3 py-2 font-bold text-red-600">−₹{Number(r.conveyance_amount).toLocaleString("en-IN")}</td>
+                        <td className="px-3 py-2 font-bold text-green-600">{r.credit_total > 0 ? "+₹"+Number(r.credit_total).toLocaleString("en-IN") : "—"}</td>
+                        <td className="px-3 py-2"><span className="px-1.5 py-0.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 rounded text-[10px] font-semibold capitalize">{r.closure_type}</span></td>
+                        <td className="px-3 py-2 text-slate-500 max-w-[160px] truncate">{r.description || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700">
+                    <tr>
+                      <td colSpan={4} className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-300">TOTAL ({fieldBulkRows.length} rows)</td>
+                      <td className="px-3 py-2 font-black text-red-600">−₹{fieldBulkRows.reduce((s,r) => s+r.conveyance_amount,0).toLocaleString("en-IN")}</td>
+                      <td className="px-3 py-2 font-black text-green-600">+₹{fieldBulkRows.reduce((s,r) => s+r.credit_total,0).toLocaleString("en-IN")}</td>
+                      <td colSpan={2}></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {fieldBulkDone && (
+            <div className="flex items-center gap-3 p-4 rounded-xl bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400">
+              <CheckCircle2 className="h-6 w-6 shrink-0" />
+              <div>
+                <p className="font-bold">Field expenses uploaded & approved!</p>
+                <p className="text-xs mt-0.5">All entries in Supabase as approved. View in <strong>Field Expenses</strong> tab.</p>
+              </div>
+              <Button size="sm" variant="outline" className="ml-auto" onClick={handleFieldBulkReset}>Upload More</Button>
+            </div>
+          )}
+          </> }
+
         </div>
-      )}
+        );
+      })()}
 
       {/* ── LEDGER ── */}
       {!loading && tab === 'Ledger' && (
