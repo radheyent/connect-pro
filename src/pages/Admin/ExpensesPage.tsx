@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { CheckCircle, XCircle, Trash2, Edit, Download, Plus, Settings, TrendingUp, TrendingDown, IndianRupee, Users, ShieldAlert, Upload, FileUp, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { CheckCircle, XCircle, Trash2, Edit, Download, Plus, Settings, TrendingUp, TrendingDown, IndianRupee, Users, ShieldAlert, Upload, FileUp, AlertCircle, CheckCircle2, Search } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const TABS = ['Overview', 'Pending', 'Field Expenses', 'Office Expenses', 'Bulk Upload', 'Ledger', 'Budget'] as const;
@@ -435,34 +435,34 @@ const ExpensesPage: React.FC = () => {
   // ── Bulk Upload Handlers ──────────────────────────────────────────────────
 
   const BULK_COLUMNS = ['Date (YYYY-MM-DD)', 'Category', 'Amount', 'Description'] as const;
-  const VALID_CATS = ['tea_refreshments','stationary','travel','food','internet','other'];
+  const VALID_CATS = ['tea_refreshments','stationary','internet','other','travel','food','customer_bill_payment','self_recharge','amt_transfer'];
 
   const handleSampleDownload = () => {
     const empNames = employees.map((e: any) => e.name);
     const sampleRows = [
-      { 'Date (YYYY-MM-DD)': '2026-06-01', 'Spent By (Employee Name)': empNames[0] || 'Rahul Kumar', Category: 'tea_refreshments', Amount: 150,   Description: 'Morning tea for team' },
-      { 'Date (YYYY-MM-DD)': '2026-06-02', 'Spent By (Employee Name)': empNames[1] || 'Priya Singh',  Category: 'stationary',       Amount: 340,   Description: 'Pens and registers' },
-      { 'Date (YYYY-MM-DD)': '2026-06-03', 'Spent By (Employee Name)': empNames[0] || 'Rahul Kumar', Category: 'travel',           Amount: 500,   Description: 'Customer bill payment' },
-      { 'Date (YYYY-MM-DD)': '2026-06-04', 'Spent By (Employee Name)': empNames[1] || 'Priya Singh',  Category: 'food',             Amount: 1200,  Description: 'Amt transfer to customer' },
-      { 'Date (YYYY-MM-DD)': '2026-06-05', 'Spent By (Employee Name)': empNames[0] || 'Rahul Kumar', Category: 'internet',         Amount: 299,   Description: 'Self recharge' },
-      { 'Date (YYYY-MM-DD)': '2026-06-06', 'Spent By (Employee Name)': empNames[2] || 'Amit Sharma', Category: 'other',            Amount: 750,   Description: 'Other expense' },
+      { 'Date (YYYY-MM-DD)': '2026-06-01', 'Spent By (Employee Name)': empNames[0] || 'Rahul Kumar', Category: 'Tea & Refreshments',       Amount: 150,   Description: 'Morning chai for team' },
+      { 'Date (YYYY-MM-DD)': '2026-06-02', 'Spent By (Employee Name)': empNames[1] || 'Priya Singh',  Category: 'Stationary',               Amount: 340,   Description: 'Pens and registers' },
+      { 'Date (YYYY-MM-DD)': '2026-06-03', 'Spent By (Employee Name)': empNames[0] || 'Rahul Kumar', Category: 'Customer Bill Payment',     Amount: 500,   Description: 'Bill paid for customer' },
+      { 'Date (YYYY-MM-DD)': '2026-06-04', 'Spent By (Employee Name)': empNames[1] || 'Priya Singh',  Category: 'Amt Transfer Customer',    Amount: 1200,  Description: 'Transfer done to customer' },
+      { 'Date (YYYY-MM-DD)': '2026-06-05', 'Spent By (Employee Name)': empNames[0] || 'Rahul Kumar', Category: 'Self Recharge',            Amount: 299,   Description: 'Mobile recharge' },
+      { 'Date (YYYY-MM-DD)': '2026-06-06', 'Spent By (Employee Name)': empNames[2] || 'Amit Sharma', Category: 'Other',                    Amount: 750,   Description: 'Miscellaneous expense' },
     ];
     const infoRows = [
-      { '': '--- VALID CATEGORIES (use exactly as shown) ---' },
-      { '': 'tea_refreshments  →  Tea & Refreshments' },
-      { '': 'stationary        →  Stationary' },
-      { '': 'travel            →  Customer Bill Payment' },
-      { '': 'food              →  Amt Transfer Customer' },
-      { '': 'internet          →  Self Recharge' },
-      { '': 'other             →  Other' },
+      { '': 'VALID CATEGORIES — paste exactly as shown:' },
+      { '': 'Tea & Refreshments' },
+      { '': 'Stationary' },
+      { '': 'Customer Bill Payment' },
+      { '': 'Amt Transfer Customer' },
+      { '': 'Self Recharge' },
+      { '': 'Other' },
       { '': '' },
-      { '': '--- YOUR REGISTERED EMPLOYEES ---' },
+      { '': 'YOUR REGISTERED EMPLOYEES:' },
       ...empNames.map((n: string) => ({ '': n })),
       { '': '' },
-      { '': 'NOTE: Date must be YYYY-MM-DD format (e.g. 2026-06-15)' },
-      { '': 'NOTE: Amount must be a number (no Rs symbol)' },
-      { '': 'NOTE: Spent By must match employee name exactly' },
-      { '': 'NOTE: Delete sample rows and add your real data' },
+      { '': 'NOTE: Date = YYYY-MM-DD (e.g. 2026-06-15)' },
+      { '': 'NOTE: Amount = number only, no Rs symbol' },
+      { '': 'NOTE: Spent By = employee name exactly as listed above' },
+      { '': 'NOTE: Delete these sample rows before uploading' },
     ];
     const wb = XLSX.utils.book_new();
     const ws1 = XLSX.utils.json_to_sheet(sampleRows);
@@ -491,6 +491,24 @@ const ExpensesPage: React.FC = () => {
         const nameToId: Record<string, string> = {};
         employees.forEach((emp: any) => { nameToId[emp.name.trim().toLowerCase()] = emp.id; });
 
+        // Map display labels → DB category + custom_category
+        // office_expenses CHECK: tea_refreshments|stationary|rent|electricity|internet|salary|miscellaneous|other
+        const labelToDb: Record<string, { category: string; custom_category: string | null }> = {
+          'tea & refreshments':     { category: 'tea_refreshments', custom_category: null },
+          'tea and refreshments':   { category: 'tea_refreshments', custom_category: null },
+          'tea_refreshments':       { category: 'tea_refreshments', custom_category: null },
+          'stationary':             { category: 'stationary',       custom_category: null },
+          'internet':               { category: 'internet',         custom_category: null },
+          'self recharge':          { category: 'other',            custom_category: 'Self Recharge' },
+          'self_recharge':          { category: 'other',            custom_category: 'Self Recharge' },
+          'customer bill payment':  { category: 'other',            custom_category: 'Customer Bill Payment' },
+          'customer_bill_payment':  { category: 'other',            custom_category: 'Customer Bill Payment' },
+          'amt transfer customer':  { category: 'other',            custom_category: 'Amt Transfer Customer' },
+          'amt_transfer_customer':  { category: 'other',            custom_category: 'Amt Transfer Customer' },
+          'amt transfer':           { category: 'other',            custom_category: 'Amt Transfer Customer' },
+          'other':                  { category: 'other',            custom_category: null },
+        };
+
         const raw: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
         const errors: string[] = [];
         const parsed: any[] = [];
@@ -499,23 +517,32 @@ const ExpensesPage: React.FC = () => {
           const rowNum   = i + 2;
           const date     = String(row['Date (YYYY-MM-DD)'] || '').trim();
           const spentBy  = String(row['Spent By (Employee Name)'] || '').trim();
-          const category = String(row['Category'] || '').trim().toLowerCase().replace(/\s+/g, '_');
+          const catRaw   = String(row['Category'] || '').trim().toLowerCase();
           const amount   = parseFloat(String(row['Amount'] || '').replace(/[^0-9.]/g, ''));
           const desc     = String(row['Description'] || '').trim();
 
           const rowErrors: string[] = [];
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(date))   rowErrors.push(`invalid date "${date}"`);
-          if (!VALID_CATS.includes(category))          rowErrors.push(`unknown category "${category}"`);
-          if (isNaN(amount) || amount <= 0)            rowErrors.push(`invalid amount "${row['Amount']}"`);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date))   rowErrors.push('invalid date (use YYYY-MM-DD)');
+          const catMap = labelToDb[catRaw];
+          if (!catMap)                                  rowErrors.push('unknown category "' + row['Category'] + '"');
+          if (isNaN(amount) || amount <= 0)            rowErrors.push('invalid amount');
           if (!desc)                                   rowErrors.push('description is empty');
 
           const spentById = spentBy ? nameToId[spentBy.toLowerCase()] : null;
-          if (spentBy && !spentById)                   rowErrors.push(`employee not found: "${spentBy}"`);
+          if (spentBy && !spentById)                   rowErrors.push('employee not found: "' + spentBy + '"');
 
           if (rowErrors.length) {
-            errors.push(`Row ${rowNum}: ${rowErrors.join(', ')}`);
+            errors.push('Row ' + rowNum + ': ' + rowErrors.join(', '));
           } else {
-            parsed.push({ expense_date: date, category, amount, description: desc, spent_by_id: spentById || null, spent_by_name: spentBy || null });
+            parsed.push({
+              expense_date:    date,
+              category:        catMap!.category,
+              custom_category: catMap!.custom_category,
+              amount,
+              description:     desc,
+              spent_by_id:     spentById || null,
+              spent_by_name:   spentBy || null,
+            });
           }
         });
 
@@ -537,11 +564,11 @@ const ExpensesPage: React.FC = () => {
       const payload = bulkRows.map(r => ({
         expense_date:    r.expense_date,
         category:        r.category,
-        custom_category: null,
+        custom_category: r.custom_category || null,
         amount:          r.amount,
-        description:     r.description,
+        // Prepend employee name to description so it's always visible
+        description:     r.spent_by_name ? '[' + r.spent_by_name + '] ' + r.description : r.description,
         added_by:        user!.id,
-        spent_by:        r.spent_by_id || null,
       }));
       const { error } = await supabase.from('office_expenses').insert(payload);
       if (error) throw error;
@@ -572,27 +599,35 @@ const ExpensesPage: React.FC = () => {
   const [fieldBulkUploading, setFieldBulkUploading] = useState(false);
   const [fieldBulkDone,      setFieldBulkDone]      = useState(false);
   const [bulkSubTab,         setBulkSubTab]          = useState<'office'|'field'>('office');
+  const [ledgerSearch,       setLedgerSearch]        = useState('');
 
-  const CLOSURE_TYPES = ['sale', 'visit', 'adhoc', 'follow_up', 'other'];
+  const CLOSURE_TYPES = ['completed','resubmission','cancelled','adhoc','customer_payment','tea_refreshments','stationary','travel','food','printing','communication','other'];
 
   const handleFieldSampleDownload = () => {
     const empNames = employees.map((e: any) => e.name);
     const sample = [
-      { 'Date (YYYY-MM-DD)': '2026-06-01', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 12, 'Conveyance Rs': 60,  'Credit Rs': 500,  'Closure Type': 'sale',      Description: 'Sale at Sector 12' },
-      { 'Date (YYYY-MM-DD)': '2026-06-02', 'Employee Name': empNames[1] || 'Priya Singh',  KM: 8,  'Conveyance Rs': 40,  'Credit Rs': 0,    'Closure Type': 'visit',     Description: 'Customer visit' },
-      { 'Date (YYYY-MM-DD)': '2026-06-03', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 5,  'Conveyance Rs': 25,  'Credit Rs': 0,    'Closure Type': 'follow_up', Description: 'Follow-up visit' },
-      { 'Date (YYYY-MM-DD)': '2026-06-04', 'Employee Name': empNames[2] || 'Amit Sharma', KM: 20, 'Conveyance Rs': 100, 'Credit Rs': 1200, 'Closure Type': 'sale',      Description: 'Two SIMs sold' },
-      { 'Date (YYYY-MM-DD)': '2026-06-05', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 0,  'Conveyance Rs': 50,  'Credit Rs': 0,    'Closure Type': 'adhoc',     Description: 'Local travel' },
+      { 'Date (YYYY-MM-DD)': '2026-06-01', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 12, 'Conveyance Rs': 60,  'Credit Rs': 500,  'Closure Type': 'completed',         Description: 'Sale closed at Sector 12' },
+      { 'Date (YYYY-MM-DD)': '2026-06-02', 'Employee Name': empNames[1] || 'Priya Singh',  KM: 8,  'Conveyance Rs': 40,  'Credit Rs': 0,    'Closure Type': 'adhoc',             Description: 'Local travel' },
+      { 'Date (YYYY-MM-DD)': '2026-06-03', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 5,  'Conveyance Rs': 25,  'Credit Rs': 0,    'Closure Type': 'customer_payment',  Description: 'Bill payment visit' },
+      { 'Date (YYYY-MM-DD)': '2026-06-04', 'Employee Name': empNames[2] || 'Amit Sharma', KM: 20, 'Conveyance Rs': 100, 'Credit Rs': 1200, 'Closure Type': 'completed',         Description: 'Two SIMs sold' },
+      { 'Date (YYYY-MM-DD)': '2026-06-05', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 0,  'Conveyance Rs': 50,  'Credit Rs': 0,    'Closure Type': 'travel',            Description: 'Travel expense' },
     ];
     const info = [
       { Info: 'INSTRUCTIONS' },
       { Info: 'Employee Name must match exactly as in system.' },
       { Info: '' },
       { Info: 'VALID CLOSURE TYPES:' },
-      { Info: 'sale' },
-      { Info: 'visit' },
+      { Info: 'completed' },
+      { Info: 'resubmission' },
+      { Info: 'cancelled' },
       { Info: 'adhoc' },
-      { Info: 'follow_up' },
+      { Info: 'customer_payment' },
+      { Info: 'tea_refreshments' },
+      { Info: 'stationary' },
+      { Info: 'travel' },
+      { Info: 'food' },
+      { Info: 'printing' },
+      { Info: 'communication' },
       { Info: 'other' },
       { Info: '' },
       { Info: 'YOUR REGISTERED EMPLOYEES:' },
@@ -641,9 +676,7 @@ const ExpensesPage: React.FC = () => {
           const km      = parseFloat(String(row['KM'] || '0').replace(/[,\s]/g, '')) || 0;
           const conv    = parseFloat(String(row['Conveyance Rs'] || '').replace(/[^0-9.]/g, ''));
           const credit  = parseFloat(String(row['Credit Rs']    || '0').replace(/[^0-9.]/g, '')) || 0;
-          // Normalize: 'ad-hoc' → 'adhoc', 'follow-up' → 'follow_up'
-          const closure = String(row['Closure Type'] || '').trim().toLowerCase()
-            .replace('ad-hoc', 'adhoc').replace('follow-up', 'follow_up').replace('-', '_');
+          const closure = String(row['Closure Type'] || '').trim().toLowerCase().replace(/\s+/g,'_');
           const desc    = String(row['Description']  || '').trim();
 
           const rowErrors: string[] = [];
@@ -1322,7 +1355,7 @@ const ExpensesPage: React.FC = () => {
             <div className="ml-8 space-y-2">
               <p className="text-xs text-slate-500 dark:text-slate-400">7 columns: Date, Employee Name, KM, Conveyance Rs, Credit Rs, Closure Type, Description</p>
               <div className="flex flex-wrap gap-1">
-                {["sale","visit","adhoc","follow_up","other"].map(t => (
+                {["completed","adhoc","customer_payment","travel","food","other"].map(t => (
                   <span key={t} className="px-2 py-0.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 rounded text-[10px] font-mono">{t}</span>
                 ))}
               </div>
@@ -1430,6 +1463,24 @@ const ExpensesPage: React.FC = () => {
       {/* ── LEDGER ── */}
       {!loading && tab === 'Ledger' && (
         <div className="space-y-3">
+          {/* Search bar */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 max-w-xs">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <input
+                value={ledgerSearch}
+                onChange={e => setLedgerSearch(e.target.value)}
+                placeholder="Search person, description…"
+                className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {ledgerSearch && (
+                <button onClick={() => setLedgerSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
+              )}
+            </div>
+            <span className="text-xs text-slate-400">
+              {ledgerSearch ? `${ledger.filter(r => (r.person + r.desc + r.source + r.date).toLowerCase().includes(ledgerSearch.toLowerCase())).length} of ${ledger.length}` : `${ledger.length} entries`}
+            </span>
+          </div>
           {/* Summary bar */}
           {ledger.length > 0 && (() => {
             const totExp    = ledger.reduce((s,r) => s + r.expense, 0); // negative
@@ -1465,9 +1516,12 @@ const ExpensesPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                {ledger.length === 0
-                  ? <tr><td colSpan={9} className="py-12 text-center text-slate-400">No approved entries</td></tr>
-                  : ledger.map((r, i) => (
+                {(() => {
+                    const fl = ledgerSearch
+                      ? ledger.filter(r => (r.person + r.desc + r.source + r.date).toLowerCase().includes(ledgerSearch.toLowerCase()))
+                      : ledger;
+                    if (fl.length === 0) return <tr><td colSpan={9} className="py-12 text-center text-slate-400">{ledgerSearch ? 'No results for "' + ledgerSearch + '"' : 'No approved entries'}</td></tr>;
+                    return fl.map((r, i) => (
                     <tr key={i} className={`hover:bg-slate-50 dark:hover:bg-slate-700/50 ${r.net < 0 ? '' : 'bg-green-50/40 dark:bg-green-950/10'}`}>
                       <td className="px-3 py-2.5 whitespace-nowrap text-slate-500 font-medium">{r.date}</td>
                       <td className="px-3 py-2.5">
@@ -1512,8 +1566,8 @@ const ExpensesPage: React.FC = () => {
                         </span>
                       </td>
                     </tr>
-                  ))
-                }
+                  ));
+                })()}
               </tbody>
             </table>
           </div>
