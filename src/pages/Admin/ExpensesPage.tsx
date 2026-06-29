@@ -550,23 +550,27 @@ const ExpensesPage: React.FC = () => {
   const [fieldBulkDone,      setFieldBulkDone]      = useState(false);
   const [bulkSubTab,         setBulkSubTab]          = useState<'office'|'field'>('office');
 
-  const CLOSURE_TYPES = ['sale', 'visit', 'ad-hoc', 'follow-up', 'other'];
+  const CLOSURE_TYPES = ['sale', 'visit', 'adhoc', 'follow_up', 'other'];
 
   const handleFieldSampleDownload = () => {
     const empNames = employees.map((e: any) => e.name);
     const sample = [
       { 'Date (YYYY-MM-DD)': '2026-06-01', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 12, 'Conveyance Rs': 60,  'Credit Rs': 500,  'Closure Type': 'sale',      Description: 'Sale at Sector 12' },
       { 'Date (YYYY-MM-DD)': '2026-06-02', 'Employee Name': empNames[1] || 'Priya Singh',  KM: 8,  'Conveyance Rs': 40,  'Credit Rs': 0,    'Closure Type': 'visit',     Description: 'Customer visit' },
-      { 'Date (YYYY-MM-DD)': '2026-06-03', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 5,  'Conveyance Rs': 25,  'Credit Rs': 0,    'Closure Type': 'follow-up', Description: 'Follow-up' },
+      { 'Date (YYYY-MM-DD)': '2026-06-03', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 5,  'Conveyance Rs': 25,  'Credit Rs': 0,    'Closure Type': 'follow_up', Description: 'Follow-up visit' },
       { 'Date (YYYY-MM-DD)': '2026-06-04', 'Employee Name': empNames[2] || 'Amit Sharma', KM: 20, 'Conveyance Rs': 100, 'Credit Rs': 1200, 'Closure Type': 'sale',      Description: 'Two SIMs sold' },
-      { 'Date (YYYY-MM-DD)': '2026-06-05', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 0,  'Conveyance Rs': 50,  'Credit Rs': 0,    'Closure Type': 'ad-hoc',   Description: 'Local travel' },
+      { 'Date (YYYY-MM-DD)': '2026-06-05', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 0,  'Conveyance Rs': 50,  'Credit Rs': 0,    'Closure Type': 'adhoc',     Description: 'Local travel' },
     ];
     const info = [
       { Info: 'INSTRUCTIONS' },
       { Info: 'Employee Name must match exactly as in system.' },
       { Info: '' },
       { Info: 'VALID CLOSURE TYPES:' },
-      ...CLOSURE_TYPES.map(t => ({ Info: t })),
+      { Info: 'sale' },
+      { Info: 'visit' },
+      { Info: 'adhoc' },
+      { Info: 'follow_up' },
+      { Info: 'other' },
       { Info: '' },
       { Info: 'YOUR REGISTERED EMPLOYEES:' },
       ...empNames.map((n: string) => ({ Info: n })),
@@ -614,7 +618,9 @@ const ExpensesPage: React.FC = () => {
           const km      = parseFloat(String(row['KM'] || '0').replace(/[,\s]/g, '')) || 0;
           const conv    = parseFloat(String(row['Conveyance Rs'] || '').replace(/[^0-9.]/g, ''));
           const credit  = parseFloat(String(row['Credit Rs']    || '0').replace(/[^0-9.]/g, '')) || 0;
-          const closure = String(row['Closure Type'] || '').trim().toLowerCase();
+          // Normalize: 'ad-hoc' → 'adhoc', 'follow-up' → 'follow_up'
+          const closure = String(row['Closure Type'] || '').trim().toLowerCase()
+            .replace('ad-hoc', 'adhoc').replace('follow-up', 'follow_up').replace('-', '_');
           const desc    = String(row['Description']  || '').trim();
 
           const rowErrors: string[] = [];
@@ -1290,7 +1296,7 @@ const ExpensesPage: React.FC = () => {
             <div className="ml-8 space-y-2">
               <p className="text-xs text-slate-500 dark:text-slate-400">7 columns: Date, Employee Name, KM, Conveyance Rs, Credit Rs, Closure Type, Description</p>
               <div className="flex flex-wrap gap-1">
-                {["sale","visit","follow-up","ad-hoc","other"].map(t => (
+                {["sale","visit","adhoc","follow_up","other"].map(t => (
                   <span key={t} className="px-2 py-0.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 rounded text-[10px] font-mono">{t}</span>
                 ))}
               </div>
