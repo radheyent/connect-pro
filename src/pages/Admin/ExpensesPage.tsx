@@ -20,10 +20,18 @@ const OFFICE_CATS = [
   'electricity','internet','salary','miscellaneous','other',
 ];
 const CAT_LABELS: Record<string,string> = {
-  tea_refreshments:'Tea & Refreshments', stationary:'Stationary', rent:'Rent',
-  electricity:'Electricity', internet:'Internet', salary:'Salary',
-  miscellaneous:'Miscellaneous', other:'Other',
-  travel:'Travel', food:'Food', printing:'Printing',
+  tea_refreshments: 'Tea & Refreshments',
+  stationary:       'Stationary',
+  travel:           'Customer Bill Payment',
+  food:             'Amt Transfer Customer',
+  internet:         'Self Recharge',
+  other:            'Other',
+  // legacy / office-only
+  rent:             'Rent',
+  electricity:      'Electricity',
+  salary:           'Salary',
+  miscellaneous:    'Miscellaneous',
+  printing:         'Printing',
 };
 
 const CAT_ICONS: Record<string,string> = {
@@ -427,30 +435,38 @@ const ExpensesPage: React.FC = () => {
   // ── Bulk Upload Handlers ──────────────────────────────────────────────────
 
   const BULK_COLUMNS = ['Date (YYYY-MM-DD)', 'Category', 'Amount', 'Description'] as const;
-  const VALID_CATS = ['tea_refreshments','stationary','rent','electricity','internet','salary','miscellaneous','other'];
+  const VALID_CATS = ['tea_refreshments','stationary','travel','food','internet','other'];
 
   const handleSampleDownload = () => {
+    const empNames = employees.map((e: any) => e.name);
     const sampleRows = [
-      { 'Date (YYYY-MM-DD)': '2026-06-01', Category: 'tea_refreshments', Amount: 150,  Description: 'Morning tea for team' },
-      { 'Date (YYYY-MM-DD)': '2026-06-02', Category: 'stationary',       Amount: 340,  Description: 'Pens and registers' },
-      { 'Date (YYYY-MM-DD)': '2026-06-03', Category: 'rent',             Amount: 15000, Description: 'Monthly office rent' },
-      { 'Date (YYYY-MM-DD)': '2026-06-04', Category: 'electricity',      Amount: 2200, Description: 'June electricity bill' },
-      { 'Date (YYYY-MM-DD)': '2026-06-05', Category: 'internet',         Amount: 999,  Description: 'Broadband monthly' },
-      { 'Date (YYYY-MM-DD)': '2026-06-06', Category: 'salary',           Amount: 12000, Description: 'Staff salary - Rahul' },
-      { 'Date (YYYY-MM-DD)': '2026-06-07', Category: 'miscellaneous',    Amount: 500,  Description: 'Miscellaneous costs' },
-      { 'Date (YYYY-MM-DD)': '2026-06-08', Category: 'other',            Amount: 750,  Description: 'Other expense' },
+      { 'Date (YYYY-MM-DD)': '2026-06-01', 'Spent By (Employee Name)': empNames[0] || 'Rahul Kumar', Category: 'tea_refreshments', Amount: 150,   Description: 'Morning tea for team' },
+      { 'Date (YYYY-MM-DD)': '2026-06-02', 'Spent By (Employee Name)': empNames[1] || 'Priya Singh',  Category: 'stationary',       Amount: 340,   Description: 'Pens and registers' },
+      { 'Date (YYYY-MM-DD)': '2026-06-03', 'Spent By (Employee Name)': empNames[0] || 'Rahul Kumar', Category: 'travel',           Amount: 500,   Description: 'Customer bill payment' },
+      { 'Date (YYYY-MM-DD)': '2026-06-04', 'Spent By (Employee Name)': empNames[1] || 'Priya Singh',  Category: 'food',             Amount: 1200,  Description: 'Amt transfer to customer' },
+      { 'Date (YYYY-MM-DD)': '2026-06-05', 'Spent By (Employee Name)': empNames[0] || 'Rahul Kumar', Category: 'internet',         Amount: 299,   Description: 'Self recharge' },
+      { 'Date (YYYY-MM-DD)': '2026-06-06', 'Spent By (Employee Name)': empNames[2] || 'Amit Sharma', Category: 'other',            Amount: 750,   Description: 'Other expense' },
     ];
     const infoRows = [
-      { '': '--- VALID CATEGORIES ---' },
-      ...VALID_CATS.map(c => ({ '': c })),
+      { '': '--- VALID CATEGORIES (use exactly as shown) ---' },
+      { '': 'tea_refreshments  →  Tea & Refreshments' },
+      { '': 'stationary        →  Stationary' },
+      { '': 'travel            →  Customer Bill Payment' },
+      { '': 'food              →  Amt Transfer Customer' },
+      { '': 'internet          →  Self Recharge' },
+      { '': 'other             →  Other' },
+      { '': '' },
+      { '': '--- YOUR REGISTERED EMPLOYEES ---' },
+      ...empNames.map((n: string) => ({ '': n })),
       { '': '' },
       { '': 'NOTE: Date must be YYYY-MM-DD format (e.g. 2026-06-15)' },
-      { '': 'NOTE: Amount must be a number (no ₹ symbol)' },
+      { '': 'NOTE: Amount must be a number (no Rs symbol)' },
+      { '': 'NOTE: Spent By must match employee name exactly' },
       { '': 'NOTE: Delete sample rows and add your real data' },
     ];
     const wb = XLSX.utils.book_new();
     const ws1 = XLSX.utils.json_to_sheet(sampleRows);
-    ws1['!cols'] = [{ wch: 20 }, { wch: 22 }, { wch: 12 }, { wch: 40 }];
+    ws1['!cols'] = [{ wch: 20 }, { wch: 28 }, { wch: 20 }, { wch: 12 }, { wch: 40 }];
     XLSX.utils.book_append_sheet(wb, ws1, 'Expenses Upload');
     const ws2 = XLSX.utils.json_to_sheet(infoRows);
     ws2['!cols'] = [{ wch: 50 }];
@@ -472,16 +488,19 @@ const ExpensesPage: React.FC = () => {
       try {
         const wb = XLSX.read(ev.target?.result, { type: 'binary', cellDates: true });
         const ws  = wb.Sheets[wb.SheetNames[0]];
-        const raw: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        const nameToId: Record<string, string> = {};
+        employees.forEach((emp: any) => { nameToId[emp.name.trim().toLowerCase()] = emp.id; });
 
+        const raw: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
         const errors: string[] = [];
         const parsed: any[] = [];
 
         raw.forEach((row, i) => {
-          const rowNum = i + 2; // Excel row number (1=header)
+          const rowNum   = i + 2;
           const date     = String(row['Date (YYYY-MM-DD)'] || '').trim();
+          const spentBy  = String(row['Spent By (Employee Name)'] || '').trim();
           const category = String(row['Category'] || '').trim().toLowerCase().replace(/\s+/g, '_');
-          const amount   = parseFloat(String(row['Amount'] || '').replace(/[₹,\s]/g, ''));
+          const amount   = parseFloat(String(row['Amount'] || '').replace(/[^0-9.]/g, ''));
           const desc     = String(row['Description'] || '').trim();
 
           const rowErrors: string[] = [];
@@ -490,10 +509,13 @@ const ExpensesPage: React.FC = () => {
           if (isNaN(amount) || amount <= 0)            rowErrors.push(`invalid amount "${row['Amount']}"`);
           if (!desc)                                   rowErrors.push('description is empty');
 
+          const spentById = spentBy ? nameToId[spentBy.toLowerCase()] : null;
+          if (spentBy && !spentById)                   rowErrors.push(`employee not found: "${spentBy}"`);
+
           if (rowErrors.length) {
             errors.push(`Row ${rowNum}: ${rowErrors.join(', ')}`);
           } else {
-            parsed.push({ expense_date: date, category, amount, description: desc, _ok: true });
+            parsed.push({ expense_date: date, category, amount, description: desc, spent_by_id: spentById || null, spent_by_name: spentBy || null });
           }
         });
 
@@ -519,6 +541,7 @@ const ExpensesPage: React.FC = () => {
         amount:          r.amount,
         description:     r.description,
         added_by:        user!.id,
+        spent_by:        r.spent_by_id || null,
       }));
       const { error } = await supabase.from('office_expenses').insert(payload);
       if (error) throw error;
@@ -1142,7 +1165,7 @@ const ExpensesPage: React.FC = () => {
             </p>
             <div className="ml-8">
               <div className="flex flex-wrap gap-1 mb-3">
-                {['tea_refreshments','stationary','rent','electricity','internet','salary','miscellaneous','other'].map(c => (
+                {['tea_refreshments','stationary','travel','food','internet','other'].map(c => (
                   <span key={c} className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded text-[10px] font-mono">{c}</span>
                 ))}
               </div>
@@ -1226,7 +1249,7 @@ const ExpensesPage: React.FC = () => {
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0">
                     <tr>
-                      {['#', 'Date', 'Category', 'Amount', 'Description'].map(h => (
+                      {['#', 'Date', 'Spent By', 'Category', 'Amount', 'Description'].map(h => (
                         <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -1235,20 +1258,23 @@ const ExpensesPage: React.FC = () => {
                     {bulkRows.map((r, i) => (
                       <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
                         <td className="px-3 py-2 text-slate-400">{i + 1}</td>
-                        <td className="px-3 py-2 text-slate-600 dark:text-slate-300 font-medium">{r.expense_date}</td>
+                        <td className="px-3 py-2 text-slate-600 dark:text-slate-300 font-medium whitespace-nowrap">{r.expense_date}</td>
+                        <td className="px-3 py-2 font-semibold text-slate-800 dark:text-white whitespace-nowrap">
+                          {r.spent_by_name || <span className="text-slate-400 font-normal italic text-xs">—</span>}
+                        </td>
                         <td className="px-3 py-2">
                           <span className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded text-[10px] font-mono">
                             {CAT_ICONS[r.category] || '📋'} {CAT_LABELS[r.category] || r.category}
                           </span>
                         </td>
-                        <td className="px-3 py-2 font-bold text-red-600">−₹{Number(r.amount).toLocaleString('en-IN')}</td>
-                        <td className="px-3 py-2 text-slate-500 dark:text-slate-400 max-w-[220px] truncate">{r.description}</td>
+                        <td className="px-3 py-2 font-bold text-red-600 whitespace-nowrap">−₹{Number(r.amount).toLocaleString('en-IN')}</td>
+                        <td className="px-3 py-2 text-slate-500 dark:text-slate-400 max-w-[180px] truncate">{r.description}</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot className="bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700">
                     <tr>
-                      <td colSpan={3} className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-300">TOTAL ({bulkRows.length} rows)</td>
+                      <td colSpan={4} className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-300">TOTAL ({bulkRows.length} rows)</td>
                       <td className="px-3 py-2 font-black text-red-600 text-sm">
                         −₹{bulkRows.reduce((s, r) => s + r.amount, 0).toLocaleString('en-IN')}
                       </td>
