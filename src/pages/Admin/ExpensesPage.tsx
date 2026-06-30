@@ -222,6 +222,7 @@ const ExpensesPage: React.FC = () => {
           date:    e.expense_date,
           source:  'Field',
           person:  empMap[e.field_boy_id] || '—',
+          category: 'Conveyance',
           desc:    leadMap[e.lead_id] || e.description || 'Ad-hoc',
           km:      Number(e.kilometres) || 0,
           expense: -(Number(e.conveyance_amount) || 0),   // always negative
@@ -230,8 +231,9 @@ const ExpensesPage: React.FC = () => {
       ...officeExp.map(e => ({
         date:    e.expense_date,
         source:  'Office',
-        person:  CAT_LABELS[e.category] || e.custom_category || e.category,
-        desc:    e.description,
+        person:  e.spent_by_name || empMap[e.added_by] || '—',
+        category: e.category || e.custom_category || 'Other',
+        desc:    e.description + (e.remarks ? ` (${e.remarks})` : ''),
         km:      0,
         expense: -(Number(e.amount) || 0),                 // always negative
         credit:  0,
@@ -242,21 +244,36 @@ const ExpensesPage: React.FC = () => {
           date:    e.expense_date,
           source:  'Employee',
           person:  empMap[e.user_id] || '—',
-          desc:    `${CAT_LABELS[e.category] || e.custom_category || e.category} — ${e.description}`,
+          category: CAT_LABELS[e.category] || e.custom_category || e.category,
+          desc:    e.description,
           km:      0,
           expense: -(Number(e.amount) || 0),               // always negative
           credit:  0,
         })),
-    ].sort((a, b) => (a.date < b.date ? 1 : -1));
+    ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)); // ascending: oldest first
 
-    // running = cumulative (credit + expense) — positive = profit, negative = loss
+    // running = cumulative (credit + expense), calculated oldest→newest
     let running = 0;
-    return rows.map(r => {
+    const withBalance = rows.map(r => {
       const net = r.credit + r.expense; // credit(+) + expense(-)
       running += net;
       return { ...r, net, running };
     });
+
+    // Reverse for display: newest first (standard ledger view)
+    return withBalance.reverse();
   }, [fieldExp, officeExp, empExp, empMap, leadMap]);
+
+  // ── Spend totals per person (for Ledger tab summary) ───────────────────────
+  const spendByPerson = useMemo(() => {
+    const totals: Record<string, number> = {};
+    ledger.forEach(r => {
+      if (r.expense < 0) {
+        totals[r.person] = (totals[r.person] || 0) + Math.abs(r.expense);
+      }
+    });
+    return Object.entries(totals).sort((a, b) => b[1] - a[1]); // highest spender first
+  }, [ledger]);
 
   // ── Per-employee budget usage this month ───────────────────────────────────
   const empBudgetUsage = useMemo(() => {
@@ -1526,11 +1543,11 @@ const ExpensesPage: React.FC = () => {
 
       {/* ── LEDGER ── */}
       {!loading && tab === 'Ledger' && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {/* Search bar */}
           {(() => {
             const fl = ledgerSearch
-              ? ledger.filter(r => (r.person + r.desc + r.source + r.date).toLowerCase().includes(ledgerSearch.toLowerCase()))
+              ? ledger.filter(r => (r.person + r.desc + r.source + r.date + r.category).toLowerCase().includes(ledgerSearch.toLowerCase()))
               : ledger;
             const flExp    = fl.reduce((s,r) => s + r.expense, 0);
             const flCredit = fl.reduce((s,r) => s + r.credit, 0);
@@ -1543,7 +1560,7 @@ const ExpensesPage: React.FC = () => {
                     <input
                       value={ledgerSearch}
                       onChange={e => setLedgerSearch(e.target.value)}
-                      placeholder="Search person, description, source…"
+                      placeholder="Search by name, category, description…"
                       className="w-full pl-9 pr-8 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     {ledgerSearch && (
@@ -1554,8 +1571,8 @@ const ExpensesPage: React.FC = () => {
                     {ledgerSearch ? `${fl.length} of ${ledger.length} entries` : `${ledger.length} entries`}
                   </span>
                 </div>
-                {ledgerSearch && fl.length > 0 && (
-                  <div className="flex gap-3 flex-wrap text-xs px-1">
+                {ledgerSearch && (
+                  <div className="flex gap-3 flex-wrap text-xs px-1 py-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
                     <span className="text-red-600 font-bold">Expense: −₹{Math.abs(flExp).toFixed(0)}</span>
                     <span className="text-green-600 font-bold">Credit: +₹{flCredit.toFixed(0)}</span>
                     <span className={`font-black ${flNet >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -1566,12 +1583,29 @@ const ExpensesPage: React.FC = () => {
               </div>
             );
           })()}
-          {/* Summary bar */}
+
+          {/* Spend by Person — who spent how much */}
+          {spendByPerson.length > 0 && (
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">👤 Total Spent — By Person</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                {spendByPerson.map(([name, amount]) => (
+                  <div key={name} className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-700">
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{name}</span>
+                    <span className="text-xs font-black text-red-600 whitespace-nowrap">−₹{amount.toFixed(0)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Overall totals */}
           {ledger.length > 0 && (() => {
-            const totExp    = ledger.reduce((s,r) => s + r.expense, 0); // negative
-            const totCredit = ledger.reduce((s,r) => s + r.credit, 0);  // positive
+            const totExp    = ledger.reduce((s,r) => s + r.expense, 0);
+            const totCredit = ledger.reduce((s,r) => s + r.credit, 0);
             const totNet    = totCredit + totExp;
-            return (
+            const hasCredit = totCredit > 0;
+            return hasCredit ? (
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-xl p-3 text-center">
                   <p className="text-[10px] font-bold text-red-400 uppercase tracking-wider">Total Expense</p>
@@ -1588,65 +1622,56 @@ const ExpensesPage: React.FC = () => {
                   </p>
                 </div>
               </div>
+            ) : (
+              <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-xl p-3 flex items-center justify-between">
+                <p className="text-xs font-bold text-red-500 uppercase tracking-wider">Total Spent (all entries)</p>
+                <p className="text-xl font-black text-red-600">−₹{Math.abs(totExp).toFixed(0)}</p>
+              </div>
             );
           })()}
 
+          {/* Ledger table */}
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm overflow-x-auto">
-            <table className="w-full text-xs min-w-[720px]">
+            <table className="w-full text-xs min-w-[760px] border-collapse">
               <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
                 <tr>
-                  {['Date','Source','Person','Description','KM','Expense','Credit','Net','Balance'].map(h => (
-                    <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">{h}</th>
+                  {['Date','Source','Spent By','Category','Description','Expense','Credit','Balance'].map(h => (
+                    <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                 {(() => {
                     const fl = ledgerSearch
-                      ? ledger.filter(r => (r.person + r.desc + r.source + r.date).toLowerCase().includes(ledgerSearch.toLowerCase()))
+                      ? ledger.filter(r => (r.person + r.desc + r.source + r.date + r.category).toLowerCase().includes(ledgerSearch.toLowerCase()))
                       : ledger;
-                    if (fl.length === 0) return (<tr><td colSpan={9} className="py-12 text-center text-slate-400">{ledgerSearch ? `No results for "${ledgerSearch}"` : 'No approved entries'}</td></tr>);
+                    if (fl.length === 0) return (<tr><td colSpan={8} className="py-10 text-center text-slate-400 text-sm">{ledgerSearch ? `No results for "${ledgerSearch}"` : 'No approved entries'}</td></tr>);
                     return fl.map((r, i) => (
-                    <tr key={i} className={`hover:bg-slate-50 dark:hover:bg-slate-700/50 ${r.net < 0 ? '' : 'bg-green-50/40 dark:bg-green-950/10'}`}>
-                      <td className="px-3 py-2.5 whitespace-nowrap text-slate-500 font-medium">{r.date}</td>
-                      <td className="px-3 py-2.5">
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                    <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/40 align-top">
+                      <td className="px-3 py-2 whitespace-nowrap text-slate-500 text-xs">{r.date}</td>
+                      <td className="px-3 py-2">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${
                           r.source==='Field'    ? 'bg-blue-100 text-blue-700' :
                           r.source==='Employee' ? 'bg-violet-100 text-violet-700' :
                                                   'bg-slate-100 text-slate-600'}`}>
                           {r.source}
                         </span>
                       </td>
-                      <td className="px-3 py-2.5 font-medium text-slate-700 dark:text-slate-200">{r.person}</td>
-                      <td className="px-3 py-2.5 text-slate-500 max-w-[150px] truncate">{r.desc}</td>
-                      <td className="px-3 py-2.5 text-blue-600">{r.km > 0 ? r.km : '—'}</td>
-
-                      {/* Expense — always shown red negative */}
-                      <td className="px-3 py-2.5 font-semibold">
+                      <td className="px-3 py-2 font-semibold text-slate-800 dark:text-slate-100 text-xs whitespace-nowrap">{r.person}</td>
+                      <td className="px-3 py-2 text-slate-500 dark:text-slate-400 text-xs whitespace-nowrap">{r.category}</td>
+                      <td className="px-3 py-2 text-slate-500 dark:text-slate-400 text-xs max-w-[180px] truncate">{r.desc}</td>
+                      <td className="px-3 py-2 text-xs font-bold whitespace-nowrap">
                         {r.expense < 0
                           ? <span className="text-red-600">−₹{Math.abs(r.expense).toFixed(0)}</span>
                           : <span className="text-slate-300">—</span>}
                       </td>
-
-                      {/* Credit — always shown green positive */}
-                      <td className="px-3 py-2.5 font-semibold">
+                      <td className="px-3 py-2 text-xs font-bold whitespace-nowrap">
                         {r.credit > 0
                           ? <span className="text-green-600">+₹{r.credit.toFixed(0)}</span>
                           : <span className="text-slate-300">—</span>}
                       </td>
-
-                      {/* Net per row — green if profit, red if loss */}
-                      <td className="px-3 py-2.5 font-bold">
-                        {r.net > 0
-                          ? <span className="text-green-600">+₹{r.net.toFixed(0)}</span>
-                          : r.net < 0
-                            ? <span className="text-red-600">−₹{Math.abs(r.net).toFixed(0)}</span>
-                            : <span className="text-slate-400">₹0</span>}
-                      </td>
-
-                      {/* Running balance — green positive, red negative */}
-                      <td className="px-3 py-2.5">
-                        <span className={`font-black text-sm ${r.running >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <span className={`font-black text-xs ${r.running >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                           {r.running >= 0 ? '+' : '−'}₹{Math.abs(r.running).toFixed(0)}
                         </span>
                       </td>
