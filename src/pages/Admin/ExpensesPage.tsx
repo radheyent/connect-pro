@@ -434,39 +434,41 @@ const ExpensesPage: React.FC = () => {
 
   // ── Bulk Upload Handlers ──────────────────────────────────────────────────
 
-  const BULK_COLUMNS = ['Date (YYYY-MM-DD)', 'Category', 'Amount', 'Description'] as const;
-  const VALID_CATS = ['tea_refreshments','stationary','internet','other','travel','food','customer_bill_payment','self_recharge','amt_transfer'];
+  // Office bulk upload — free-text category + plain text spent-by name
+  // (matches real-world usage: Ice, Recharge, Refreshment, 3rd Party Sale, etc.
+  //  and spenders that aren't always registered employees e.g. "Store")
+  const COMMON_OFFICE_CATS = [
+    'Refreshment', 'Ice', 'Recharge', 'Bill Payment Cust', 'Stationary',
+    '3rd Party Sale', 'Clean', 'Water Bill', 'Courier', 'Printer', 'SKYC', 'Other',
+  ];
 
   const handleSampleDownload = () => {
     const empNames = employees.map((e: any) => e.name);
     const sampleRows = [
-      { 'Date (YYYY-MM-DD)': '2026-06-01', 'Spent By (Employee Name)': empNames[0] || 'Rahul Kumar', Category: 'Tea & Refreshments',       Amount: 150,   Description: 'Morning chai for team' },
-      { 'Date (YYYY-MM-DD)': '2026-06-02', 'Spent By (Employee Name)': empNames[1] || 'Priya Singh',  Category: 'Stationary',               Amount: 340,   Description: 'Pens and registers' },
-      { 'Date (YYYY-MM-DD)': '2026-06-03', 'Spent By (Employee Name)': empNames[0] || 'Rahul Kumar', Category: 'Customer Bill Payment',     Amount: 500,   Description: 'Bill paid for customer' },
-      { 'Date (YYYY-MM-DD)': '2026-06-04', 'Spent By (Employee Name)': empNames[1] || 'Priya Singh',  Category: 'Amt Transfer Customer',    Amount: 1200,  Description: 'Transfer done to customer' },
-      { 'Date (YYYY-MM-DD)': '2026-06-05', 'Spent By (Employee Name)': empNames[0] || 'Rahul Kumar', Category: 'Self Recharge',            Amount: 299,   Description: 'Mobile recharge' },
-      { 'Date (YYYY-MM-DD)': '2026-06-06', 'Spent By (Employee Name)': empNames[2] || 'Amit Sharma', Category: 'Other',                    Amount: 750,   Description: 'Miscellaneous expense' },
+      { 'Date (YYYY-MM-DD)': '2026-06-01', Category: 'Ice',               'Spent By Name': 'Ram',    Description: 'Ice',                         Remarks: '',                       Amount: 20 },
+      { 'Date (YYYY-MM-DD)': '2026-06-01', Category: 'Bill Payment Cust', 'Spent By Name': 'Vishnu', Description: 'Bill Payment Customer 9306181900', Remarks: 'Manisha Sale',        Amount: 70 },
+      { 'Date (YYYY-MM-DD)': '2026-06-01', Category: 'Recharge',          'Spent By Name': 'Vishnu', Description: 'Recharge Neha',                Remarks: '',                       Amount: 199 },
+      { 'Date (YYYY-MM-DD)': '2026-06-02', Category: 'Refreshment',       'Spent By Name': 'Vishnu', Description: 'Tea',                          Remarks: '',                       Amount: 45 },
+      { 'Date (YYYY-MM-DD)': '2026-06-06', Category: '3rd Party Sale',    'Spent By Name': 'Ram',    Description: 'Visit Charges 3rd Party Close', Remarks: 'Transfer Sumt ptm',      Amount: 150 },
+      { 'Date (YYYY-MM-DD)': '2026-06-18', Category: 'Water Bill',        'Spent By Name': 'Vishnu', Description: 'Rent',                         Remarks: '',                       Amount: 350 },
+      { 'Date (YYYY-MM-DD)': '2026-06-24', Category: 'Other',             'Spent By Name': 'Ram',    Description: 'Security Deposit',             Remarks: 'SD Shivani Relative Manesar', Amount: 250 },
     ];
     const infoRows = [
-      { '': 'VALID CATEGORIES — paste exactly as shown:' },
-      { '': 'Tea & Refreshments' },
-      { '': 'Stationary' },
-      { '': 'Customer Bill Payment' },
-      { '': 'Amt Transfer Customer' },
-      { '': 'Self Recharge' },
-      { '': 'Other' },
+      { '': 'CATEGORY — type any text you like (free text, not restricted):' },
+      ...COMMON_OFFICE_CATS.map(c => ({ '': c })),
+      { '': '(you can also type a brand-new category not in this list)' },
       { '': '' },
-      { '': 'YOUR REGISTERED EMPLOYEES:' },
+      { '': 'SPENT BY NAME — type any name (employee or otherwise, e.g. "Store"):' },
       ...empNames.map((n: string) => ({ '': n })),
       { '': '' },
       { '': 'NOTE: Date = YYYY-MM-DD (e.g. 2026-06-15)' },
       { '': 'NOTE: Amount = number only, no Rs symbol' },
-      { '': 'NOTE: Spent By = employee name exactly as listed above' },
+      { '': 'NOTE: Remarks = optional extra note' },
       { '': 'NOTE: Delete these sample rows before uploading' },
     ];
     const wb = XLSX.utils.book_new();
     const ws1 = XLSX.utils.json_to_sheet(sampleRows);
-    ws1['!cols'] = [{ wch: 20 }, { wch: 28 }, { wch: 20 }, { wch: 12 }, { wch: 40 }];
+    ws1['!cols'] = [{ wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 35 }, { wch: 22 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, ws1, 'Expenses Upload');
     const ws2 = XLSX.utils.json_to_sheet(infoRows);
     ws2['!cols'] = [{ wch: 50 }];
@@ -488,27 +490,6 @@ const ExpensesPage: React.FC = () => {
       try {
         const wb = XLSX.read(ev.target?.result, { type: 'binary', cellDates: true });
         const ws  = wb.Sheets[wb.SheetNames[0]];
-        const nameToId: Record<string, string> = {};
-        employees.forEach((emp: any) => { nameToId[emp.name.trim().toLowerCase()] = emp.id; });
-
-        // Map display labels → DB category + custom_category
-        // office_expenses CHECK: tea_refreshments|stationary|rent|electricity|internet|salary|miscellaneous|other
-        const labelToDb: Record<string, { category: string; custom_category: string | null }> = {
-          'tea & refreshments':     { category: 'tea_refreshments', custom_category: null },
-          'tea and refreshments':   { category: 'tea_refreshments', custom_category: null },
-          'tea_refreshments':       { category: 'tea_refreshments', custom_category: null },
-          'stationary':             { category: 'stationary',       custom_category: null },
-          'internet':               { category: 'internet',         custom_category: null },
-          'self recharge':          { category: 'other',            custom_category: 'Self Recharge' },
-          'self_recharge':          { category: 'other',            custom_category: 'Self Recharge' },
-          'customer bill payment':  { category: 'other',            custom_category: 'Customer Bill Payment' },
-          'customer_bill_payment':  { category: 'other',            custom_category: 'Customer Bill Payment' },
-          'amt transfer customer':  { category: 'other',            custom_category: 'Amt Transfer Customer' },
-          'amt_transfer_customer':  { category: 'other',            custom_category: 'Amt Transfer Customer' },
-          'amt transfer':           { category: 'other',            custom_category: 'Amt Transfer Customer' },
-          'other':                  { category: 'other',            custom_category: null },
-        };
-
         const raw: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
         const errors: string[] = [];
         const parsed: any[] = [];
@@ -516,32 +497,28 @@ const ExpensesPage: React.FC = () => {
         raw.forEach((row, i) => {
           const rowNum   = i + 2;
           const date     = String(row['Date (YYYY-MM-DD)'] || '').trim();
-          const spentBy  = String(row['Spent By (Employee Name)'] || '').trim();
-          const catRaw   = String(row['Category'] || '').trim().toLowerCase();
-          const amount   = parseFloat(String(row['Amount'] || '').replace(/[^0-9.]/g, ''));
+          const category = String(row['Category'] || '').trim();
+          const spentBy  = String(row['Spent By Name'] || '').trim();
           const desc     = String(row['Description'] || '').trim();
+          const remarks  = String(row['Remarks'] || '').trim();
+          const amount   = parseFloat(String(row['Amount'] || '').replace(/[^0-9.]/g, ''));
 
           const rowErrors: string[] = [];
           if (!/^\d{4}-\d{2}-\d{2}$/.test(date))   rowErrors.push('invalid date (use YYYY-MM-DD)');
-          const catMap = labelToDb[catRaw];
-          if (!catMap)                                  rowErrors.push('unknown category "' + row['Category'] + '"');
+          if (!category)                               rowErrors.push('category is empty');
           if (isNaN(amount) || amount <= 0)            rowErrors.push('invalid amount');
           if (!desc)                                   rowErrors.push('description is empty');
-
-          const spentById = spentBy ? nameToId[spentBy.toLowerCase()] : null;
-          if (spentBy && !spentById)                   rowErrors.push('employee not found: "' + spentBy + '"');
 
           if (rowErrors.length) {
             errors.push('Row ' + rowNum + ': ' + rowErrors.join(', '));
           } else {
             parsed.push({
-              expense_date:    date,
-              category:        catMap!.category,
-              custom_category: catMap!.custom_category,
+              expense_date:  date,
+              category,
+              spent_by_name: spentBy || null,
+              description:   desc,
+              remarks:       remarks || null,
               amount,
-              description:     desc,
-              spent_by_id:     spentById || null,
-              spent_by_name:   spentBy || null,
             });
           }
         });
@@ -562,13 +539,13 @@ const ExpensesPage: React.FC = () => {
     setBulkUploading(true);
     try {
       const payload = bulkRows.map(r => ({
-        expense_date:    r.expense_date,
-        category:        r.category,
-        custom_category: r.custom_category || null,
-        amount:          r.amount,
-        // Prepend employee name to description so it's always visible
-        description:     r.spent_by_name ? '[' + r.spent_by_name + '] ' + r.description : r.description,
-        added_by:        user!.id,
+        expense_date:  r.expense_date,
+        category:      r.category,
+        spent_by_name: r.spent_by_name,
+        description:   r.description,
+        remarks:       r.remarks,
+        amount:        r.amount,
+        added_by:      user!.id,
       }));
       const { error } = await supabase.from('office_expenses').insert(payload);
       if (error) throw error;
@@ -600,35 +577,23 @@ const ExpensesPage: React.FC = () => {
   const [fieldBulkDone,      setFieldBulkDone]      = useState(false);
   const [bulkSubTab,         setBulkSubTab]          = useState<'office'|'field'>('office');
   const [ledgerSearch,       setLedgerSearch]        = useState('');
-
-  const CLOSURE_TYPES = ['completed','resubmission','cancelled','adhoc','customer_payment','tea_refreshments','stationary','travel','food','printing','communication','other'];
+  const [selectedFieldIds,   setSelectedFieldIds]    = useState<Set<string>>(new Set());
+  const [selectedOfficeIds,  setSelectedOfficeIds]   = useState<Set<string>>(new Set());
+  const [bulkDeleting,       setBulkDeleting]        = useState(false);
+  const [bulkDeleteConfirm,  setBulkDeleteConfirm]   = useState<{ table: string; ids: string[] } | null>(null);
 
   const handleFieldSampleDownload = () => {
     const empNames = employees.map((e: any) => e.name);
     const sample = [
-      { 'Date (YYYY-MM-DD)': '2026-06-01', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 12, 'Conveyance Rs': 60,  'Credit Rs': 500,  'Closure Type': 'completed',         Description: 'Sale closed at Sector 12' },
-      { 'Date (YYYY-MM-DD)': '2026-06-02', 'Employee Name': empNames[1] || 'Priya Singh',  KM: 8,  'Conveyance Rs': 40,  'Credit Rs': 0,    'Closure Type': 'adhoc',             Description: 'Local travel' },
-      { 'Date (YYYY-MM-DD)': '2026-06-03', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 5,  'Conveyance Rs': 25,  'Credit Rs': 0,    'Closure Type': 'customer_payment',  Description: 'Bill payment visit' },
-      { 'Date (YYYY-MM-DD)': '2026-06-04', 'Employee Name': empNames[2] || 'Amit Sharma', KM: 20, 'Conveyance Rs': 100, 'Credit Rs': 1200, 'Closure Type': 'completed',         Description: 'Two SIMs sold' },
-      { 'Date (YYYY-MM-DD)': '2026-06-05', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 0,  'Conveyance Rs': 50,  'Credit Rs': 0,    'Closure Type': 'travel',            Description: 'Travel expense' },
+      { 'Date (YYYY-MM-DD)': '2026-06-01', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 12, 'Conveyance Rs': 60,  'Credit Rs': 500,  Description: 'Sale closed at Sector 12' },
+      { 'Date (YYYY-MM-DD)': '2026-06-02', 'Employee Name': empNames[1] || 'Priya Singh',  KM: 8,  'Conveyance Rs': 40,  'Credit Rs': 0,    Description: 'Local travel' },
+      { 'Date (YYYY-MM-DD)': '2026-06-03', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 5,  'Conveyance Rs': 25,  'Credit Rs': 0,    Description: 'Bill payment visit' },
+      { 'Date (YYYY-MM-DD)': '2026-06-04', 'Employee Name': empNames[2] || 'Amit Sharma', KM: 20, 'Conveyance Rs': 100, 'Credit Rs': 1200, Description: 'Two SIMs sold' },
+      { 'Date (YYYY-MM-DD)': '2026-06-05', 'Employee Name': empNames[0] || 'Rahul Kumar', KM: 0,  'Conveyance Rs': 50,  'Credit Rs': 0,    Description: 'Travel expense' },
     ];
     const info = [
       { Info: 'INSTRUCTIONS' },
       { Info: 'Employee Name must match exactly as in system.' },
-      { Info: '' },
-      { Info: 'VALID CLOSURE TYPES:' },
-      { Info: 'completed' },
-      { Info: 'resubmission' },
-      { Info: 'cancelled' },
-      { Info: 'adhoc' },
-      { Info: 'customer_payment' },
-      { Info: 'tea_refreshments' },
-      { Info: 'stationary' },
-      { Info: 'travel' },
-      { Info: 'food' },
-      { Info: 'printing' },
-      { Info: 'communication' },
-      { Info: 'other' },
       { Info: '' },
       { Info: 'YOUR REGISTERED EMPLOYEES:' },
       ...empNames.map((n: string) => ({ Info: n })),
@@ -676,7 +641,6 @@ const ExpensesPage: React.FC = () => {
           const km      = parseFloat(String(row['KM'] || '0').replace(/[,\s]/g, '')) || 0;
           const conv    = parseFloat(String(row['Conveyance Rs'] || '').replace(/[^0-9.]/g, ''));
           const credit  = parseFloat(String(row['Credit Rs']    || '0').replace(/[^0-9.]/g, '')) || 0;
-          const closure = String(row['Closure Type'] || '').trim().toLowerCase().replace(/\s+/g,'_');
           const desc    = String(row['Description']  || '').trim();
 
           const rowErrors: string[] = [];
@@ -684,12 +648,11 @@ const ExpensesPage: React.FC = () => {
           const empId = nameToId[empName.toLowerCase()];
           if (!empId)                                  rowErrors.push('employee not found: "' + empName + '"');
           if (isNaN(conv) || conv <= 0)                rowErrors.push('invalid conveyance amount');
-          if (!CLOSURE_TYPES.includes(closure))        rowErrors.push('invalid closure type: "' + closure + '"');
 
           if (rowErrors.length) {
             errors.push('Row ' + rowNum + ': ' + rowErrors.join(', '));
           } else {
-            parsed.push({ expense_date: date, field_boy_id: empId, employee_name: empName, kilometres: km, conveyance_amount: conv, credit_total: isNaN(credit) ? 0 : credit, closure_type: closure, description: desc || null });
+            parsed.push({ expense_date: date, field_boy_id: empId, employee_name: empName, kilometres: km, conveyance_amount: conv, credit_total: isNaN(credit) ? 0 : credit, description: desc || null });
           }
         });
 
@@ -711,7 +674,7 @@ const ExpensesPage: React.FC = () => {
       const payload = fieldBulkRows.map(r => ({
         expense_date: r.expense_date, field_boy_id: r.field_boy_id,
         kilometres: r.kilometres, conveyance_amount: r.conveyance_amount,
-        credit_total: r.credit_total, closure_type: r.closure_type,
+        credit_total: r.credit_total,
         description: r.description, status: 'approved',
         approved_by: user!.id, approved_at: new Date().toISOString(),
       }));
@@ -737,6 +700,45 @@ const ExpensesPage: React.FC = () => {
     setFieldBulkDone(false);
   };
 
+  // ── Bulk Select & Delete ───────────────────────────────────────────────────
+  const toggleFieldSelect = (id: string) => {
+    setSelectedFieldIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+  const toggleOfficeSelect = (id: string) => {
+    setSelectedOfficeIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+  const selectAllField = (ids: string[]) => setSelectedFieldIds(new Set(ids));
+  const selectAllOffice = (ids: string[]) => setSelectedOfficeIds(new Set(ids));
+  const clearFieldSelection = () => setSelectedFieldIds(new Set());
+  const clearOfficeSelection = () => setSelectedOfficeIds(new Set());
+
+  const handleBulkDelete = async () => {
+    if (!bulkDeleteConfirm) return;
+    const { table, ids } = bulkDeleteConfirm;
+    setBulkDeleting(true);
+    try {
+      const { error } = await supabase.from(table).delete().in('id', ids);
+      if (error) throw error;
+      toast.success(`${ids.length} entries deleted`);
+      if (table === 'field_expenses') clearFieldSelection();
+      if (table === 'office_expenses') clearOfficeSelection();
+      setBulkDeleteConfirm(null);
+      fetchAll();
+    } catch (e: any) {
+      toast.error('Bulk delete failed: ' + e.message);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   // ── FieldExpRow ────────────────────────────────────────────────────────────
   const FieldRow = ({ exp, showActions = true }: { exp: any; showActions?: boolean; key?: any }) => {
     const budget = budgets[exp.field_boy_id];
@@ -745,6 +747,12 @@ const ExpensesPage: React.FC = () => {
 
     return (
       <div className="p-4 flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={selectedFieldIds.has(exp.id)}
+          onChange={() => toggleFieldSelect(exp.id)}
+          className="mt-1.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
+        />
         <div className="flex-1 min-w-0 space-y-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-sm">{empMap[exp.field_boy_id] || '—'}</span>
@@ -1047,6 +1055,31 @@ const ExpensesPage: React.FC = () => {
             )}
             <span className="text-xs text-slate-400 ml-auto">{filteredField.length} entries</span>
           </div>
+
+          {/* Bulk select bar */}
+          {filteredField.length > 0 && (
+            <div className="flex items-center gap-3 px-1">
+              <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={selectedFieldIds.size > 0 && selectedFieldIds.size === filteredField.length}
+                  onChange={() => selectedFieldIds.size === filteredField.length ? clearFieldSelection() : selectAllField(filteredField.map(e => e.id))}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                Select all
+              </label>
+              {selectedFieldIds.size > 0 && (
+                <>
+                  <span className="text-xs text-blue-600 font-bold">{selectedFieldIds.size} selected</span>
+                  <Button size="sm" variant="destructive" className="h-7 text-xs ml-auto"
+                    onClick={() => setBulkDeleteConfirm({ table: 'field_expenses', ids: [...selectedFieldIds] })}>
+                    <Trash2 className="h-3.5 w-3.5 mr-1" />Delete Selected
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
             {filteredField.length === 0
               ? <div className="py-12 text-center text-slate-400">No expenses found</div>
@@ -1062,26 +1095,64 @@ const ExpensesPage: React.FC = () => {
 
           {/* Admin-added Office Expenses */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">🏢 Office Expenses (Admin Added)</p>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">🏢 Office Expenses ({officeExp.length})</p>
               <Button size="sm" onClick={() => { setEditOfficeId(null); setOfficeForm(EMPTY_OFFICE_FORM); setIsOfficeOpen(true); }}>
                 <Plus className="h-4 w-4 mr-1" />Add
               </Button>
             </div>
+
+            {/* Bulk select bar */}
+            {officeExp.length > 0 && (
+              <div className="flex items-center gap-3 px-1">
+                <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={selectedOfficeIds.size > 0 && selectedOfficeIds.size === officeExp.length}
+                    onChange={() => selectedOfficeIds.size === officeExp.length ? clearOfficeSelection() : selectAllOffice(officeExp.map(e => e.id))}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  Select all
+                </label>
+                {selectedOfficeIds.size > 0 && (
+                  <>
+                    <span className="text-xs text-blue-600 font-bold">{selectedOfficeIds.size} selected</span>
+                    <Button size="sm" variant="destructive" className="h-7 text-xs ml-auto"
+                      onClick={() => setBulkDeleteConfirm({ table: 'office_expenses', ids: [...selectedOfficeIds] })}>
+                      <Trash2 className="h-3.5 w-3.5 mr-1" />Delete Selected
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
+
             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
               {officeExp.length === 0
                 ? <div className="py-8 text-center text-slate-400 text-sm">No office expenses yet</div>
                 : officeExp.map(exp => (
-                  <div key={exp.id} className="p-4 flex items-center gap-4">
+                  <div key={exp.id} className="p-4 flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedOfficeIds.has(exp.id)}
+                      onChange={() => toggleOfficeSelect(exp.id)}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
+                    />
                     <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-lg shrink-0">
-                      {CAT_ICONS[exp.category] || '📋'}
+                      📋
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm">{CAT_LABELS[exp.category] || exp.custom_category || exp.category}</span>
-                        <span className="text-orange-600 font-bold text-sm">₹{exp.amount}</span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm">{exp.category || exp.custom_category}</span>
+                        {exp.spent_by_name && (
+                          <span className="text-[10px] bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded font-semibold">
+                            👤 {exp.spent_by_name}
+                          </span>
+                        )}
+                        <span className="text-orange-600 font-bold text-sm ml-auto">−₹{exp.amount}</span>
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">{exp.description} · {exp.expense_date} · {empMap[exp.added_by] || '—'}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {exp.description}{exp.remarks ? ` · ${exp.remarks}` : ''} · {exp.expense_date}
+                      </p>
                     </div>
                     <div className="flex gap-1 shrink-0">
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
@@ -1194,12 +1265,13 @@ const ExpensesPage: React.FC = () => {
               <p className="font-semibold text-slate-800 dark:text-white text-sm">Download Sample Template</p>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 ml-8">
-              Template has 4 required columns: <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Date (YYYY-MM-DD)</code>, <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Category</code>, <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Amount</code>, <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Description</code>
+              Columns: <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Date</code> <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Category</code> <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Spent By Name</code> <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Description</code> <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Remarks</code> <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Amount</code>
             </p>
+            <p className="text-xs text-slate-400 ml-8">Category &amp; Spent By Name are free text — type anything, no fixed list.</p>
             <div className="ml-8">
               <div className="flex flex-wrap gap-1 mb-3">
-                {['tea_refreshments','stationary','travel','food','internet','other'].map(c => (
-                  <span key={c} className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded text-[10px] font-mono">{c}</span>
+                {COMMON_OFFICE_CATS.map(c => (
+                  <span key={c} className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded text-[10px]">{c}</span>
                 ))}
               </div>
               <Button size="sm" onClick={handleSampleDownload} className="bg-blue-600 hover:bg-blue-700">
@@ -1282,7 +1354,7 @@ const ExpensesPage: React.FC = () => {
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0">
                     <tr>
-                      {['#', 'Date', 'Spent By', 'Category', 'Amount', 'Description'].map(h => (
+                      {['#', 'Date', 'Category', 'Spent By', 'Description', 'Remarks', 'Amount'].map(h => (
                         <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -1292,26 +1364,24 @@ const ExpensesPage: React.FC = () => {
                       <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
                         <td className="px-3 py-2 text-slate-400">{i + 1}</td>
                         <td className="px-3 py-2 text-slate-600 dark:text-slate-300 font-medium whitespace-nowrap">{r.expense_date}</td>
+                        <td className="px-3 py-2">
+                          <span className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded text-[10px]">{r.category}</span>
+                        </td>
                         <td className="px-3 py-2 font-semibold text-slate-800 dark:text-white whitespace-nowrap">
                           {r.spent_by_name || <span className="text-slate-400 font-normal italic text-xs">—</span>}
                         </td>
-                        <td className="px-3 py-2">
-                          <span className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded text-[10px] font-mono">
-                            {CAT_ICONS[r.category] || '📋'} {CAT_LABELS[r.category] || r.category}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 font-bold text-red-600 whitespace-nowrap">−₹{Number(r.amount).toLocaleString('en-IN')}</td>
                         <td className="px-3 py-2 text-slate-500 dark:text-slate-400 max-w-[180px] truncate">{r.description}</td>
+                        <td className="px-3 py-2 text-slate-400 max-w-[140px] truncate">{r.remarks || '—'}</td>
+                        <td className="px-3 py-2 font-bold text-red-600 whitespace-nowrap">−₹{Number(r.amount).toLocaleString('en-IN')}</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot className="bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700">
                     <tr>
-                      <td colSpan={4} className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-300">TOTAL ({bulkRows.length} rows)</td>
+                      <td colSpan={6} className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-300">TOTAL ({bulkRows.length} rows)</td>
                       <td className="px-3 py-2 font-black text-red-600 text-sm">
                         −₹{bulkRows.reduce((s, r) => s + r.amount, 0).toLocaleString('en-IN')}
                       </td>
-                      <td></td>
                     </tr>
                   </tfoot>
                 </table>
@@ -1340,7 +1410,7 @@ const ExpensesPage: React.FC = () => {
               <p className="font-bold text-sm mb-1">Bulk Upload Field Expenses</p>
               <ol className="list-decimal ml-4 space-y-0.5">
                 <li>Download template — includes your registered employees list</li>
-                <li>Fill Date, Employee Name, KM, Conveyance, Credit, Closure Type</li>
+                <li>Fill Date, Employee Name, KM, Conveyance, Credit, Description</li>
                 <li>Upload — employee name matched to ID automatically</li>
                 <li>Entries saved as <strong>Approved</strong> directly (admin override)</li>
               </ol>
@@ -1353,12 +1423,7 @@ const ExpensesPage: React.FC = () => {
               <p className="font-semibold text-slate-800 dark:text-white text-sm">Download Field Template</p>
             </div>
             <div className="ml-8 space-y-2">
-              <p className="text-xs text-slate-500 dark:text-slate-400">7 columns: Date, Employee Name, KM, Conveyance Rs, Credit Rs, Closure Type, Description</p>
-              <div className="flex flex-wrap gap-1">
-                {["completed","adhoc","customer_payment","travel","food","other"].map(t => (
-                  <span key={t} className="px-2 py-0.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 rounded text-[10px] font-mono">{t}</span>
-                ))}
-              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">6 columns: Date, Employee Name, KM, Conveyance Rs, Credit Rs, Description</p>
               <Button size="sm" onClick={handleFieldSampleDownload} className="bg-violet-600 hover:bg-violet-700 text-white mt-1">
                 <Download className="h-4 w-4 mr-1.5" />Download Field Template
               </Button>
@@ -1416,7 +1481,7 @@ const ExpensesPage: React.FC = () => {
               <div className="overflow-x-auto max-h-72 overflow-y-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0">
-                    <tr>{["#","Date","Employee","KM","Conveyance","Credit","Closure","Description"].map(h => <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">{h}</th>)}</tr>
+                    <tr>{["#","Date","Employee","KM","Conveyance","Credit","Description"].map(h => <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">{h}</th>)}</tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                     {fieldBulkRows.map((r,i) => (
@@ -1427,8 +1492,7 @@ const ExpensesPage: React.FC = () => {
                         <td className="px-3 py-2 text-blue-600">{r.kilometres > 0 ? r.kilometres : "—"}</td>
                         <td className="px-3 py-2 font-bold text-red-600">−₹{Number(r.conveyance_amount).toLocaleString("en-IN")}</td>
                         <td className="px-3 py-2 font-bold text-green-600">{r.credit_total > 0 ? "+₹"+Number(r.credit_total).toLocaleString("en-IN") : "—"}</td>
-                        <td className="px-3 py-2"><span className="px-1.5 py-0.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 rounded text-[10px] font-semibold capitalize">{r.closure_type}</span></td>
-                        <td className="px-3 py-2 text-slate-500 max-w-[160px] truncate">{r.description || "—"}</td>
+                        <td className="px-3 py-2 text-slate-500 max-w-[220px] truncate">{r.description || "—"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1437,7 +1501,7 @@ const ExpensesPage: React.FC = () => {
                       <td colSpan={4} className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-300">TOTAL ({fieldBulkRows.length} rows)</td>
                       <td className="px-3 py-2 font-black text-red-600">−₹{fieldBulkRows.reduce((s,r) => s+r.conveyance_amount,0).toLocaleString("en-IN")}</td>
                       <td className="px-3 py-2 font-black text-green-600">+₹{fieldBulkRows.reduce((s,r) => s+r.credit_total,0).toLocaleString("en-IN")}</td>
-                      <td colSpan={2}></td>
+                      <td></td>
                     </tr>
                   </tfoot>
                 </table>
@@ -1464,23 +1528,44 @@ const ExpensesPage: React.FC = () => {
       {!loading && tab === 'Ledger' && (
         <div className="space-y-3">
           {/* Search bar */}
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1 max-w-xs">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <input
-                value={ledgerSearch}
-                onChange={e => setLedgerSearch(e.target.value)}
-                placeholder="Search person, description…"
-                className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              {ledgerSearch && (
-                <button onClick={() => setLedgerSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
-              )}
-            </div>
-            <span className="text-xs text-slate-400">
-              {ledgerSearch ? `${ledger.filter(r => (r.person + r.desc + r.source + r.date).toLowerCase().includes(ledgerSearch.toLowerCase())).length} of ${ledger.length}` : `${ledger.length} entries`}
-            </span>
-          </div>
+          {(() => {
+            const fl = ledgerSearch
+              ? ledger.filter(r => (r.person + r.desc + r.source + r.date).toLowerCase().includes(ledgerSearch.toLowerCase()))
+              : ledger;
+            const flExp    = fl.reduce((s,r) => s + r.expense, 0);
+            const flCredit = fl.reduce((s,r) => s + r.credit, 0);
+            const flNet    = flCredit + flExp;
+            return (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="relative flex-1 max-w-xs">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <input
+                      value={ledgerSearch}
+                      onChange={e => setLedgerSearch(e.target.value)}
+                      placeholder="Search person, description, source…"
+                      className="w-full pl-9 pr-8 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    {ledgerSearch && (
+                      <button onClick={() => setLedgerSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-500 text-lg leading-none">&times;</button>
+                    )}
+                  </div>
+                  <span className="text-xs text-slate-400 whitespace-nowrap">
+                    {ledgerSearch ? `${fl.length} of ${ledger.length} entries` : `${ledger.length} entries`}
+                  </span>
+                </div>
+                {ledgerSearch && fl.length > 0 && (
+                  <div className="flex gap-3 flex-wrap text-xs px-1">
+                    <span className="text-red-600 font-bold">Expense: −₹{Math.abs(flExp).toFixed(0)}</span>
+                    <span className="text-green-600 font-bold">Credit: +₹{flCredit.toFixed(0)}</span>
+                    <span className={`font-black ${flNet >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      Net: {flNet >= 0 ? '+' : '−'}₹{Math.abs(flNet).toFixed(0)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {/* Summary bar */}
           {ledger.length > 0 && (() => {
             const totExp    = ledger.reduce((s,r) => s + r.expense, 0); // negative
@@ -1520,7 +1605,7 @@ const ExpensesPage: React.FC = () => {
                     const fl = ledgerSearch
                       ? ledger.filter(r => (r.person + r.desc + r.source + r.date).toLowerCase().includes(ledgerSearch.toLowerCase()))
                       : ledger;
-                    if (fl.length === 0) return <tr><td colSpan={9} className="py-12 text-center text-slate-400">{ledgerSearch ? 'No results for "' + ledgerSearch + '"' : 'No approved entries'}</td></tr>;
+                    if (fl.length === 0) return (<tr><td colSpan={9} className="py-12 text-center text-slate-400">{ledgerSearch ? `No results for "${ledgerSearch}"` : 'No approved entries'}</td></tr>);
                     return fl.map((r, i) => (
                     <tr key={i} className={`hover:bg-slate-50 dark:hover:bg-slate-700/50 ${r.net < 0 ? '' : 'bg-green-50/40 dark:bg-green-950/10'}`}>
                       <td className="px-3 py-2.5 whitespace-nowrap text-slate-500 font-medium">{r.date}</td>
@@ -1715,6 +1800,26 @@ const ExpensesPage: React.FC = () => {
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
             <Button variant="destructive" onClick={handleDelete}>Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delete Confirmation */}
+      <Dialog open={!!bulkDeleteConfirm} onOpenChange={v => { if (!v) setBulkDeleteConfirm(null); }}>
+        <DialogContent className="sm:max-w-[360px]">
+          <DialogHeader>
+            <DialogTitle className="text-red-600 flex items-center gap-2">
+              <Trash2 className="h-4 w-4" /> Confirm Bulk Delete
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600 py-2">
+            Delete <strong>{bulkDeleteConfirm?.ids.length}</strong> selected {bulkDeleteConfirm?.table === 'field_expenses' ? 'field' : 'office'} expense entries? This cannot be undone.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setBulkDeleteConfirm(null)} disabled={bulkDeleting}>Cancel</Button>
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={bulkDeleting}>
+              {bulkDeleting ? 'Deleting…' : `Delete ${bulkDeleteConfirm?.ids.length || ''} Entries`}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
