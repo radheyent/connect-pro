@@ -12,7 +12,7 @@ import { format } from 'date-fns';
 import { CheckCircle, XCircle, Trash2, Edit, Download, Plus, Settings, TrendingUp, TrendingDown, IndianRupee, Users, ShieldAlert, Upload, FileUp, AlertCircle, CheckCircle2, Search } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-const TABS = ['Overview', 'Pending', 'Field Expenses', 'Office Expenses', 'Bulk Upload', 'Ledger', 'Budget'] as const;
+const TABS = ['Overview', 'Pending', 'Field Expenses', 'Office Expenses', 'Credits', 'Bulk Upload', 'Ledger', 'Budget'] as const;
 type TabType = typeof TABS[number];
 
 const OFFICE_CATS = [
@@ -41,11 +41,41 @@ const CAT_ICONS: Record<string,string> = {
 };
 
 const EMPTY_OFFICE_FORM = {
-  category: 'tea_refreshments',
+  category: '',
+  custom_category: '',
+  spent_by_name: '',
+  amount: '',
+  description: '',
+  remarks: '',
+  expense_date: new Date().toISOString().split('T')[0],
+};
+
+// ── Admin Credits — incoming money ──────────────────────────────────────────
+const CREDIT_CAT_LABELS: Record<string,string> = {
+  charges_collected: '💳 Charges Collected',
+  incentive:         '🎁 Incentive',
+  security_deposit:  '🔒 Security Deposit',
+  payout:            '💵 Payout',
+  refund:            '↩️ Refund',
+  other:             '➕ Other',
+};
+
+const EMPTY_CREDIT_FORM = {
+  category: 'charges_collected',
   custom_category: '',
   amount: '',
   description: '',
+  credit_date: new Date().toISOString().split('T')[0],
+  reference: '',
+};
+
+const EMPTY_FIELD_FORM = {
+  field_boy_id: '',
   expense_date: new Date().toISOString().split('T')[0],
+  kilometres: '',
+  conveyance_amount: '',
+  credit_total: '',
+  description: '',
 };
 
 const StatusBadge = ({ s }: { s: string }) => {
@@ -115,10 +145,22 @@ const ExpensesPage: React.FC = () => {
   const [editOfficeId,   setEditOfficeId]   = useState<string|null>(null);
   const [saving,         setSaving]         = useState(false);
 
+  // ── Admin Credits state ───────────────────────────────────────────────────
+  const [adminCredits,   setAdminCredits]   = useState<any[]>([]);
+  const [isCreditOpen,   setIsCreditOpen]   = useState(false);
+  const [editCreditId,   setEditCreditId]   = useState<string|null>(null);
+  const [creditForm,     setCreditForm]     = useState(EMPTY_CREDIT_FORM);
+  const [savingCredit,   setSavingCredit]   = useState(false);
+
+  // ── Manual Field Expense entry (admin) ────────────────────────────────────
+  const [isFieldAddOpen, setIsFieldAddOpen] = useState(false);
+  const [fieldAddForm,   setFieldAddForm]   = useState(EMPTY_FIELD_FORM);
+  const [savingFieldAdd, setSavingFieldAdd] = useState(false);
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [feRes, oeRes, upRes, setRes, budgetRes, eeRes] = await Promise.all([
+      const [feRes, oeRes, upRes, setRes, budgetRes, eeRes, acRes] = await Promise.all([
         supabase.from('field_expenses').select('*').order('expense_date', { ascending: false }),
         supabase.from('office_expenses').select('*').order('expense_date', { ascending: false }),
         supabase.from('user_profiles').select('id,name').eq('is_active', true),
@@ -126,6 +168,7 @@ const ExpensesPage: React.FC = () => {
         // Try to fetch budgets — table may not exist yet, silently handle
         supabase.from('expense_budgets').select('*'),
         supabase.from('employee_expenses').select('*').order('expense_date', { ascending: false }),
+        supabase.from('admin_credits').select('*').order('credit_date', { ascending: false }),
       ]);
 
       const em: Record<string,string> = {};
@@ -144,6 +187,12 @@ const ExpensesPage: React.FC = () => {
       setFieldExp(feRes.data || []);
       setEmpExp(eeRes.data || []);
       setOfficeExp(oeRes.data || []);
+      if (acRes.error && (acRes.error as any).code === '42P01') {
+        // admin_credits table doesn't exist yet — safe to ignore
+        setAdminCredits([]);
+      } else {
+        setAdminCredits(acRes.data || []);
+      }
 
       const rate = parseFloat(setRes.data?.value || '5') || 5;
       setKmRate(rate);
@@ -185,15 +234,18 @@ const ExpensesPage: React.FC = () => {
     const af = fieldExp.filter(e => e.status === 'approved' && e.expense_date?.startsWith(month));
     const oe = officeExp.filter(e => e.expense_date?.startsWith(month));
     const ae = empExp.filter(e => e.status === 'approved' && e.expense_date?.startsWith(month));
+    const ac = adminCredits.filter(e => e.credit_date?.startsWith(month));
     const fieldConv = af.reduce((s,e) => s + (Number(e.conveyance_amount)||0), 0);
-    const credit    = af.reduce((s,e) => s + (Number(e.credit_total)||0), 0);
+    const fieldCredit = af.reduce((s,e) => s + (Number(e.credit_total)||0), 0);
+    const adminCreditTotal = ac.reduce((s,e) => s + (Number(e.amount)||0), 0);
+    const credit    = fieldCredit + adminCreditTotal;
     const km        = af.reduce((s,e) => s + (Number(e.kilometres)||0), 0);
     const office    = oe.reduce((s,e) => s + (Number(e.amount)||0), 0);
     const empTotal  = ae.reduce((s,e) => s + (Number(e.amount)||0), 0);
     const totalExpense = fieldConv + office + empTotal;
     const profit = credit - totalExpense;
     return { fieldConv, credit, km, office: office + empTotal, net: totalExpense - credit, totalExpense, profit };
-  }, [fieldExp, officeExp, empExp]);
+  }, [fieldExp, officeExp, empExp, adminCredits]);
 
   const summary      = useMemo(() => computeSummary(thisMonth), [computeSummary, thisMonth]);
   const monthSummary = useMemo(() => computeSummary(monthView), [computeSummary, monthView]);
@@ -203,9 +255,10 @@ const ExpensesPage: React.FC = () => {
       ...fieldExp.map(e => e.expense_date?.slice(0,7)).filter(Boolean),
       ...officeExp.map(e => e.expense_date?.slice(0,7)).filter(Boolean),
       ...empExp.map(e => e.expense_date?.slice(0,7)).filter(Boolean),
+      ...adminCredits.map(e => e.credit_date?.slice(0,7)).filter(Boolean),
     ]);
     return [...months].sort().reverse();
-  }, [fieldExp, officeExp, empExp]);
+  }, [fieldExp, officeExp, empExp, adminCredits]);
 
   const filteredField = useMemo(() => fieldExp.filter(e => {
     if (empFilter !== 'all' && e.field_boy_id !== empFilter) return false;
@@ -250,6 +303,16 @@ const ExpensesPage: React.FC = () => {
           expense: -(Number(e.amount) || 0),               // always negative
           credit:  0,
         })),
+      ...adminCredits.map(e => ({
+        date:    e.credit_date,
+        source:  'Credit',
+        person:  e.description || CREDIT_CAT_LABELS[e.category] || e.category,
+        category: CREDIT_CAT_LABELS[e.category] || e.custom_category || e.category,
+        desc:    e.description + (e.reference ? ` (Ref: ${e.reference})` : ''),
+        km:      0,
+        expense: 0,
+        credit:  +(Number(e.amount) || 0),
+      })),
     ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)); // ascending: oldest first
 
     // running = cumulative (credit + expense), calculated oldest→newest
@@ -262,7 +325,7 @@ const ExpensesPage: React.FC = () => {
 
     // Reverse for display: newest first (standard ledger view)
     return withBalance.reverse();
-  }, [fieldExp, officeExp, empExp, empMap, leadMap]);
+  }, [fieldExp, officeExp, empExp, adminCredits, empMap, leadMap]);
 
   // ── Spend totals per person (for Ledger tab summary) ───────────────────────
   const spendByPerson = useMemo(() => {
@@ -361,16 +424,18 @@ const ExpensesPage: React.FC = () => {
   };
 
   const saveOffice = async () => {
+    if (!officeForm.category.trim()) { toast.error('Category required'); return; }
     if (!officeForm.amount || parseFloat(officeForm.amount) <= 0) { toast.error('Amount required'); return; }
     if (!officeForm.description.trim()) { toast.error('Description required'); return; }
     if (!officeForm.expense_date) { toast.error('Date required'); return; }
     setSaving(true);
     try {
       const payload: any = {
-        category: officeForm.category,
-        custom_category: officeForm.category === 'other' ? (officeForm.custom_category || null) : null,
+        category: officeForm.category.trim(),
+        spent_by_name: officeForm.spent_by_name?.trim() || null,
         amount: parseFloat(officeForm.amount),
         description: officeForm.description.trim(),
+        remarks: officeForm.remarks?.trim() || null,
         expense_date: officeForm.expense_date,
         added_by: user!.id,
         updated_at: new Date().toISOString(),
@@ -408,6 +473,71 @@ const ExpensesPage: React.FC = () => {
       fetchAll();
     } catch (e: any) { toast.error(e.message); }
     finally { setSaving(false); }
+  };
+
+  // ── Admin Credits — save (add/edit) ───────────────────────────────────────
+  const saveCredit = async () => {
+    if (!creditForm.amount || parseFloat(creditForm.amount) <= 0) { toast.error('Amount required'); return; }
+    if (!creditForm.description.trim()) { toast.error('Description required'); return; }
+    if (!creditForm.credit_date) { toast.error('Date required'); return; }
+    setSavingCredit(true);
+    try {
+      const payload: any = {
+        category: creditForm.category,
+        custom_category: creditForm.category === 'other' ? (creditForm.custom_category || null) : null,
+        amount: parseFloat(creditForm.amount),
+        description: creditForm.description.trim(),
+        credit_date: creditForm.credit_date,
+        reference: creditForm.reference.trim() || null,
+        added_by: user!.id,
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = editCreditId
+        ? await supabase.from('admin_credits').update(payload).eq('id', editCreditId)
+        : await supabase.from('admin_credits').insert(payload);
+      if (error) {
+        if ((error as any).code === '42P01') {
+          toast.error('admin_credits table not found. Run the SQL migration first.', { duration: 8000 });
+        } else {
+          throw error;
+        }
+        return;
+      }
+      toast.success(editCreditId ? 'Credit updated' : 'Credit added');
+      setIsCreditOpen(false);
+      setEditCreditId(null);
+      setCreditForm(EMPTY_CREDIT_FORM);
+      fetchAll();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setSavingCredit(false); }
+  };
+
+  // ── Manual Field Expense entry (admin) — save ─────────────────────────────
+  const saveFieldAdd = async () => {
+    if (!fieldAddForm.field_boy_id) { toast.error('Select an employee'); return; }
+    if (!fieldAddForm.conveyance_amount || parseFloat(fieldAddForm.conveyance_amount) <= 0) { toast.error('Conveyance amount required'); return; }
+    if (!fieldAddForm.expense_date) { toast.error('Date required'); return; }
+    setSavingFieldAdd(true);
+    try {
+      const payload: any = {
+        field_boy_id:      fieldAddForm.field_boy_id,
+        expense_date:      fieldAddForm.expense_date,
+        kilometres:        parseFloat(fieldAddForm.kilometres) || 0,
+        conveyance_amount: parseFloat(fieldAddForm.conveyance_amount),
+        credit_total:      parseFloat(fieldAddForm.credit_total) || 0,
+        description:       fieldAddForm.description.trim() || null,
+        status:             'approved',
+        approved_by:        user!.id,
+        approved_at:        new Date().toISOString(),
+      };
+      const { error } = await supabase.from('field_expenses').insert(payload);
+      if (error) throw error;
+      toast.success('Field expense added & approved');
+      setIsFieldAddOpen(false);
+      setFieldAddForm(EMPTY_FIELD_FORM);
+      fetchAll();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setSavingFieldAdd(false); }
   };
 
   const saveKmRate = async () => {
@@ -853,7 +983,7 @@ const ExpensesPage: React.FC = () => {
       {/* ── OVERVIEW ── */}
       {!loading && tab === 'Overview' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
             {[
               { label: 'Field Conveyance',  val: `−₹${summary.fieldConv.toFixed(0)}`, color: 'text-red-600' },
               { label: 'Office Expenses',   val: `−₹${summary.office.toFixed(0)}`,    color: 'text-red-600' },
@@ -861,72 +991,72 @@ const ExpensesPage: React.FC = () => {
               { label: 'Total KM (month)',  val: `${summary.km.toFixed(1)} km`,       color: 'text-blue-600' },
             ].map(({ label, val, color }) => (
               <Card key={label}>
-                <CardContent className="p-4">
-                  <p className={`text-2xl font-black ${color}`}>{val}</p>
-                  <p className="text-xs text-slate-500 mt-1">{label} — This Month</p>
+                <CardContent className="p-3">
+                  <p className={`text-lg font-black ${color}`}>{val}</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">{label} — This Month</p>
                 </CardContent>
               </Card>
             ))}
           </div>
 
-          <div className={`rounded-2xl p-5 border-2 flex items-center justify-between gap-4 flex-wrap ${
+          <div className={`rounded-xl p-4 border flex items-center justify-between gap-4 flex-wrap ${
             summary.profit >= 0
               ? 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800'
               : 'bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800'
           }`}>
             <div className="flex items-center gap-3">
               {summary.profit >= 0
-                ? <TrendingUp className="h-8 w-8 text-green-600 shrink-0" />
-                : <TrendingDown className="h-8 w-8 text-red-500 shrink-0" />}
+                ? <TrendingUp className="h-6 w-6 text-green-600 shrink-0" />
+                : <TrendingDown className="h-6 w-6 text-red-500 shrink-0" />}
               <div>
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">This Month — Net Profit</p>
-                <p className="text-xs text-slate-400 mt-0.5">Credit Collected − (Field + Office Expense)</p>
-                <p className="text-xs text-slate-400">₹{summary.credit.toFixed(0)} − ₹{summary.totalExpense.toFixed(0)}</p>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">This Month — Net Profit</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Credit Collected − (Field + Office Expense)</p>
+                <p className="text-[11px] text-slate-400">₹{summary.credit.toFixed(0)} − ₹{summary.totalExpense.toFixed(0)}</p>
               </div>
             </div>
             <div className="text-right">
-              <p className={`text-4xl font-black ${summary.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+              <p className={`text-2xl font-black ${summary.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                 {summary.profit >= 0 ? '+' : ''}₹{Math.abs(summary.profit).toFixed(0)}
               </p>
-              <p className={`text-xs font-semibold mt-0.5 ${summary.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+              <p className={`text-[11px] font-semibold mt-0.5 ${summary.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                 {summary.profit >= 0 ? '▲ Profitable' : '▼ Loss'}
               </p>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2.5">
             <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <Settings className="h-4 w-4" /> KM Rate
+              <CardHeader className="pb-1.5 pt-3 px-3">
+                <CardTitle className="text-xs flex items-center gap-1.5">
+                  <Settings className="h-3.5 w-3.5" /> KM Rate
                 </CardTitle>
               </CardHeader>
-              <CardContent className="flex items-center gap-2">
-                <Input type="number" min="1" step="0.5" className="w-24 h-8 text-sm"
+              <CardContent className="flex items-center gap-2 px-3 pb-3">
+                <Input type="number" min="1" step="0.5" className="w-20 h-7 text-xs"
                   value={kmRateInput} onChange={e => setKmRateInput(e.target.value)} />
-                <span className="text-sm text-slate-500">₹/km</span>
-                <Button size="sm" variant="outline" onClick={saveKmRate}>Save</Button>
+                <span className="text-xs text-slate-500">₹/km</span>
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={saveKmRate}>Save</Button>
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="p-4">
-                <p className="text-3xl font-black text-yellow-600">{pendingCount}</p>
-                <p className="text-xs text-slate-500 mt-1">Pending approvals</p>
+              <CardContent className="p-3">
+                <p className="text-lg font-black text-yellow-600">{pendingCount}</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">Pending approvals</p>
               </CardContent>
             </Card>
           </div>
 
           <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <CardTitle className="text-base">Monthly Breakdown</CardTitle>
+            <CardHeader className="pb-2 pt-3 px-4">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <CardTitle className="text-sm">Monthly Breakdown</CardTitle>
                 <input type="month" value={monthView}
                   onChange={e => setMonthView(e.target.value)}
-                  className="h-8 px-2 text-xs border border-slate-200 rounded-lg dark:bg-slate-800 dark:border-slate-600 dark:text-white" />
+                  className="h-7 px-2 text-xs border border-slate-200 rounded-lg dark:bg-slate-800 dark:border-slate-600 dark:text-white" />
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <CardContent className="space-y-2.5 px-4 pb-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {[
                   { label: 'Field Conveyance', val: `−₹${monthSummary.fieldConv.toFixed(0)}`, color: 'text-red-600' },
                   { label: 'Office Expenses',  val: `−₹${monthSummary.office.toFixed(0)}`,    color: 'text-red-600' },
@@ -934,8 +1064,8 @@ const ExpensesPage: React.FC = () => {
                   { label: 'Net P&L',          val: `${monthSummary.profit >= 0 ? '+' : '−'}₹${Math.abs(monthSummary.profit).toFixed(0)}`,
                     color: monthSummary.profit >= 0 ? 'text-green-600' : 'text-red-600' },
                 ].map(({ label, val, color }) => (
-                  <div key={label} className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3 border border-slate-100 dark:border-slate-700">
-                    <p className={`text-xl font-black ${color}`}>{val}</p>
+                  <div key={label} className="bg-slate-50 dark:bg-slate-800 rounded-lg p-2.5 border border-slate-100 dark:border-slate-700">
+                    <p className={`text-sm font-black ${color}`}>{val}</p>
                     <p className="text-[10px] text-slate-400 mt-0.5">{label}</p>
                   </div>
                 ))}
@@ -1056,6 +1186,9 @@ const ExpensesPage: React.FC = () => {
       {!loading && tab === 'Field Expenses' && (
         <div className="space-y-3">
           <div className="flex gap-2 flex-wrap items-center">
+            <Button size="sm" onClick={() => { setFieldAddForm(EMPTY_FIELD_FORM); setIsFieldAddOpen(true); }}>
+              <Plus className="h-4 w-4 mr-1" />Add Entry
+            </Button>
             <Select value={empFilter} onValueChange={setEmpFilter}>
               <SelectTrigger className="w-44 h-8 text-xs"><SelectValue placeholder="All Employees" /></SelectTrigger>
               <SelectContent>
@@ -1147,47 +1280,49 @@ const ExpensesPage: React.FC = () => {
               {officeExp.length === 0
                 ? <div className="py-8 text-center text-slate-400 text-sm">No office expenses yet</div>
                 : officeExp.map(exp => (
-                  <div key={exp.id} className="p-4 flex items-center gap-3">
+                  <div key={exp.id} className="px-3 py-2.5 flex items-center gap-2.5">
                     <input
                       type="checkbox"
                       checked={selectedOfficeIds.has(exp.id)}
                       onChange={() => toggleOfficeSelect(exp.id)}
-                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
+                      className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
                     />
-                    <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-lg shrink-0">
+                    <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-sm shrink-0">
                       📋
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-sm">{exp.category || exp.custom_category}</span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-xs text-slate-800 dark:text-slate-100">{exp.category || exp.custom_category}</span>
                         {exp.spent_by_name && (
                           <span className="text-[10px] bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded font-semibold">
                             👤 {exp.spent_by_name}
                           </span>
                         )}
-                        <span className="text-orange-600 font-bold text-sm ml-auto">−₹{exp.amount}</span>
+                        <span className="text-red-600 font-bold text-xs ml-auto">−₹{exp.amount}</span>
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">
+                      <p className="text-[11px] text-slate-500 mt-0.5 truncate">
                         {exp.description}{exp.remarks ? ` · ${exp.remarks}` : ''} · {exp.expense_date}
                       </p>
                     </div>
-                    <div className="flex gap-1 shrink-0">
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
+                    <div className="flex gap-0.5 shrink-0">
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => {
                         setEditOfficeId(exp.id);
                         setOfficeForm({
-                          category: exp.category,
+                          category: exp.category || '',
                           custom_category: exp.custom_category || '',
+                          spent_by_name: exp.spent_by_name || '',
                           amount: String(exp.amount),
                           description: exp.description,
+                          remarks: exp.remarks || '',
                           expense_date: exp.expense_date,
                         });
                         setIsOfficeOpen(true);
                       }}>
-                        <Edit className="h-3.5 w-3.5 text-slate-500" />
+                        <Edit className="h-3 w-3 text-slate-500" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400"
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400"
                         onClick={() => setDeleteTarget({ id: exp.id, table: 'office_expenses', name: 'office expense' })}>
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Trash2 className="h-3 w-3" />
                       </Button>
                     </div>
                   </div>
@@ -1203,45 +1338,121 @@ const ExpensesPage: React.FC = () => {
               {empExp.length === 0
                 ? <div className="py-8 text-center text-slate-400 text-sm">No employee expenses yet</div>
                 : empExp.map(exp => (
-                  <div key={exp.id} className="p-4 flex items-start gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center text-lg shrink-0">
+                  <div key={exp.id} className="px-3 py-2.5 flex items-start gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center text-sm shrink-0">
                       {CAT_ICONS[exp.category] || '📋'}
                     </div>
-                    <div className="flex-1 min-w-0 space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-sm text-slate-900 dark:text-white">{empMap[exp.user_id] || '—'}</span>
-                        <span className="text-xs text-slate-500">{CAT_LABELS[exp.category] || exp.custom_category || exp.category}</span>
+                    <div className="flex-1 min-w-0 space-y-0.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-xs text-slate-900 dark:text-white">{empMap[exp.user_id] || '—'}</span>
+                        <span className="text-[11px] text-slate-500">{CAT_LABELS[exp.category] || exp.custom_category || exp.category}</span>
                         <StatusBadge s={exp.status} />
                       </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{exp.description}</p>
-                      <div className="flex gap-3 text-xs">
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">{exp.description}</p>
+                      <div className="flex gap-2.5 text-[11px]">
                         <span className="text-slate-400">{exp.expense_date}</span>
-                        <span className="text-orange-600 font-bold">₹{exp.amount}</span>
+                        <span className="text-red-600 font-bold">−₹{exp.amount}</span>
                       </div>
                       {exp.admin_comment && (
-                        <p className="text-xs text-red-600 bg-red-50 dark:bg-red-950/30 border border-red-200 rounded p-1.5 mt-1">
+                        <p className="text-[11px] text-red-600 bg-red-50 dark:bg-red-950/30 border border-red-200 rounded px-1.5 py-1 mt-1">
                           💬 {exp.admin_comment}
                         </p>
                       )}
                     </div>
-                    <div className="flex gap-1 shrink-0">
+                    <div className="flex gap-0.5 shrink-0">
                       {exp.status === 'pending' && (
                         <>
-                          <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700"
+                          <Button size="sm" className="h-6 text-[11px] px-1.5 bg-green-600 hover:bg-green-700"
                             onClick={() => handleApprove(exp.id, 'employee_expenses')}>✅</Button>
-                          <Button size="sm" variant="outline" className="h-7 text-xs text-red-500 border-red-200"
+                          <Button size="sm" variant="outline" className="h-6 text-[11px] px-1.5 text-red-500 border-red-200"
                             onClick={() => { setRejectTarget({ ...exp, sourceTable: 'employee_expenses' }); setRejectComment(''); }}>❌</Button>
                         </>
                       )}
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400"
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400"
                         onClick={() => setDeleteTarget({ id: exp.id, table: 'employee_expenses', name: `${empMap[exp.user_id] || 'Employee'} expense` })}>
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Trash2 className="h-3 w-3" />
                       </Button>
                     </div>
                   </div>
                 ))
               }
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CREDITS ── */}
+      {!loading && tab === 'Credits' && (
+        <div className="space-y-4">
+          <div className="flex gap-3 p-3.5 rounded-xl border border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-900 text-xs text-green-800 dark:text-green-300">
+            <IndianRupee className="h-4 w-4 shrink-0 mt-0.5 text-green-500" />
+            <div>
+              <p className="font-bold text-sm mb-0.5">Admin Credits — Incoming Money</p>
+              <p>Record all money received by the company — charges collected, incentives, security deposits, payouts, etc. These are always shown as positive (+) and contribute to profit.</p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">💰 Credits Added ({adminCredits.length})</p>
+              {adminCredits.length > 0 && (() => {
+                const monthTotal = adminCredits.filter(c => c.credit_date?.startsWith(thisMonth)).reduce((s,c) => s + (Number(c.amount)||0), 0);
+                const allTotal   = adminCredits.reduce((s,c) => s + (Number(c.amount)||0), 0);
+                return (
+                  <div className="flex gap-3 mt-0.5">
+                    <span className="text-[11px] text-green-600 font-bold">This month: +₹{monthTotal.toFixed(0)}</span>
+                    <span className="text-[11px] text-slate-400">All time: +₹{allTotal.toFixed(0)}</span>
+                  </div>
+                );
+              })()}
+            </div>
+            <Button size="sm" onClick={() => { setEditCreditId(null); setCreditForm(EMPTY_CREDIT_FORM); setIsCreditOpen(true); }}>
+              <Plus className="h-4 w-4 mr-1" />Add Credit
+            </Button>
+          </div>
+
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
+            {adminCredits.length === 0
+              ? <div className="py-10 text-center text-slate-400 text-sm">No credits added yet. Click "Add Credit" to record incoming money.</div>
+              : adminCredits.map(cr => (
+                <div key={cr.id} className="px-3 py-2.5 flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-green-50 dark:bg-green-950/30 flex items-center justify-center text-sm shrink-0">
+                    {(CREDIT_CAT_LABELS[cr.category] || '➕').split(' ')[0]}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-semibold text-xs text-slate-800 dark:text-slate-100">
+                        {(CREDIT_CAT_LABELS[cr.category] || cr.custom_category || cr.category || '').replace(/^[^\s]+\s/, '')}
+                      </span>
+                      <span className="text-green-600 font-bold text-xs ml-auto">+₹{cr.amount}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+                      {cr.description}{cr.reference ? ` · Ref: ${cr.reference}` : ''} · {cr.credit_date}
+                    </p>
+                  </div>
+                  <div className="flex gap-0.5 shrink-0">
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => {
+                      setEditCreditId(cr.id);
+                      setCreditForm({
+                        category: cr.category,
+                        custom_category: cr.custom_category || '',
+                        amount: String(cr.amount),
+                        description: cr.description,
+                        credit_date: cr.credit_date,
+                        reference: cr.reference || '',
+                      });
+                      setIsCreditOpen(true);
+                    }}>
+                      <Edit className="h-3 w-3 text-slate-500" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400"
+                      onClick={() => setDeleteTarget({ id: cr.id, table: 'admin_credits', name: 'credit entry' })}>
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              ))
+            }
           </div>
         </div>
       )}
@@ -1858,23 +2069,28 @@ const ExpensesPage: React.FC = () => {
           <div className="space-y-3 py-3">
             <div>
               <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Category *</label>
-              <Select value={officeForm.category} onValueChange={v => setOfficeForm(p => ({ ...p, category: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {OFFICE_CATS.map(c => <SelectItem key={c} value={c}>{CAT_LABELS[c]}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <Input
+                list="office-cat-suggestions"
+                placeholder="e.g. Refreshment, Ice, Recharge…"
+                value={officeForm.category}
+                onChange={e => setOfficeForm(p => ({ ...p, category: e.target.value }))}
+              />
+              <datalist id="office-cat-suggestions">
+                {COMMON_OFFICE_CATS.map(c => <option key={c} value={c} />)}
+              </datalist>
             </div>
-            {officeForm.category === 'other' && (
-              <div>
-                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Custom Category *</label>
-                <Input
-                  value={officeForm.custom_category}
-                  onChange={e => setOfficeForm(p => ({ ...p, custom_category: e.target.value }))}
-                  placeholder="e.g. Vehicle Maintenance"
-                />
-              </div>
-            )}
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Spent By Name</label>
+              <Input
+                list="office-emp-suggestions"
+                placeholder="e.g. Ram, Vishnu, Store…"
+                value={officeForm.spent_by_name || ''}
+                onChange={e => setOfficeForm(p => ({ ...p, spent_by_name: e.target.value }))}
+              />
+              <datalist id="office-emp-suggestions">
+                {employees.map(e => <option key={e.id} value={e.name} />)}
+              </datalist>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Amount ₹ *</label>
@@ -1896,9 +2112,17 @@ const ExpensesPage: React.FC = () => {
             <div>
               <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Description *</label>
               <Input
-                placeholder="e.g. Monthly office rent"
+                placeholder="e.g. Tea, Recharge Neha, Bill Payment…"
                 value={officeForm.description}
                 onChange={e => setOfficeForm(p => ({ ...p, description: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Remarks (optional)</label>
+              <Input
+                placeholder="Extra note, e.g. Transfer Sumt ptm"
+                value={officeForm.remarks || ''}
+                onChange={e => setOfficeForm(p => ({ ...p, remarks: e.target.value }))}
               />
             </div>
           </div>
@@ -1908,6 +2132,152 @@ const ExpensesPage: React.FC = () => {
             </Button>
             <Button onClick={saveOffice} disabled={saving}>
               {saving ? 'Saving...' : editOfficeId ? 'Update' : 'Add'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add/Edit Admin Credit */}
+      <Dialog open={isCreditOpen} onOpenChange={v => { if (!v) { setIsCreditOpen(false); setEditCreditId(null); setCreditForm(EMPTY_CREDIT_FORM); }}}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>{editCreditId ? 'Edit' : 'Add'} Credit Entry</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-slate-500 -mt-2">This will be counted as positive credit (+) and improve profit.</p>
+          <div className="space-y-3 py-2">
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Credit Type *</label>
+              <Select value={creditForm.category} onValueChange={v => setCreditForm(p => ({ ...p, category: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(CREDIT_CAT_LABELS).map(([k,label]) => <SelectItem key={k} value={k}>{label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            {creditForm.category === 'other' && (
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Custom Type *</label>
+                <Input
+                  value={creditForm.custom_category}
+                  onChange={e => setCreditForm(p => ({ ...p, custom_category: e.target.value }))}
+                  placeholder="e.g. Old Balance Recovery"
+                />
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Amount ₹ *</label>
+                <Input
+                  type="number" min="0" step="0.01" placeholder="0.00"
+                  value={creditForm.amount}
+                  onChange={e => setCreditForm(p => ({ ...p, amount: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Date *</label>
+                <Input
+                  type="date"
+                  value={creditForm.credit_date}
+                  onChange={e => setCreditForm(p => ({ ...p, credit_date: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Description *</label>
+              <Input
+                placeholder="e.g. SIM activation charges from customer"
+                value={creditForm.description}
+                onChange={e => setCreditForm(p => ({ ...p, description: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Reference / Invoice No. (optional)</label>
+              <Input
+                placeholder="e.g. INV-1024"
+                value={creditForm.reference}
+                onChange={e => setCreditForm(p => ({ ...p, reference: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setIsCreditOpen(false); setEditCreditId(null); setCreditForm(EMPTY_CREDIT_FORM); }}>
+              Cancel
+            </Button>
+            <Button className="bg-green-600 hover:bg-green-700" onClick={saveCredit} disabled={savingCredit}>
+              {savingCredit ? 'Saving...' : editCreditId ? 'Update' : 'Add Credit'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Field Expense (Admin manual entry) */}
+      <Dialog open={isFieldAddOpen} onOpenChange={v => { if (!v) { setIsFieldAddOpen(false); setFieldAddForm(EMPTY_FIELD_FORM); }}}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Add Field Expense</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-slate-500 -mt-2">Entry will be saved as Approved directly (admin entry).</p>
+          <div className="space-y-3 py-2">
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Employee *</label>
+              <Select value={fieldAddForm.field_boy_id} onValueChange={v => setFieldAddForm(p => ({ ...p, field_boy_id: v }))}>
+                <SelectTrigger><SelectValue placeholder="Select employee" /></SelectTrigger>
+                <SelectContent>
+                  {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Date *</label>
+                <Input
+                  type="date"
+                  value={fieldAddForm.expense_date}
+                  onChange={e => setFieldAddForm(p => ({ ...p, expense_date: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">KM</label>
+                <Input
+                  type="number" min="0" step="0.1" placeholder="0"
+                  value={fieldAddForm.kilometres}
+                  onChange={e => setFieldAddForm(p => ({ ...p, kilometres: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Conveyance ₹ *</label>
+                <Input
+                  type="number" min="0" step="0.01" placeholder="0.00"
+                  value={fieldAddForm.conveyance_amount}
+                  onChange={e => setFieldAddForm(p => ({ ...p, conveyance_amount: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Credit ₹</label>
+                <Input
+                  type="number" min="0" step="0.01" placeholder="0.00"
+                  value={fieldAddForm.credit_total}
+                  onChange={e => setFieldAddForm(p => ({ ...p, credit_total: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Description</label>
+              <Input
+                placeholder="e.g. Visit charges, SIM sale…"
+                value={fieldAddForm.description}
+                onChange={e => setFieldAddForm(p => ({ ...p, description: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setIsFieldAddOpen(false); setFieldAddForm(EMPTY_FIELD_FORM); }}>
+              Cancel
+            </Button>
+            <Button onClick={saveFieldAdd} disabled={savingFieldAdd}>
+              {savingFieldAdd ? 'Saving...' : 'Add Entry'}
             </Button>
           </DialogFooter>
         </DialogContent>
