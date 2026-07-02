@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { CheckCircle, XCircle, Trash2, Edit, Download, Plus, Settings, TrendingUp, TrendingDown, IndianRupee, Users, ShieldAlert, Upload, FileUp, AlertCircle, CheckCircle2, Search } from 'lucide-react';
+import { CheckCircle, XCircle, Trash2, Edit, Download, Plus, Settings, TrendingUp, TrendingDown, IndianRupee, Users, ShieldAlert, Upload, FileUp, AlertCircle, CheckCircle2, Search, ChevronDown, ChevronUp, Info, Eye, EyeOff } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const TABS = ['Overview', 'Pending', 'Field Expenses', 'Office Expenses', 'Credits', 'Bulk Upload', 'Ledger', 'Budget'] as const;
@@ -82,7 +82,7 @@ const StatusBadge = ({ s }: { s: string }) => {
   const c: Record<string,string> = {
     pending:  'bg-yellow-100 text-yellow-800 border-yellow-200',
     approved: 'bg-green-100 text-green-800 border-green-200',
-    rejected: 'bg-red-100 text-red-800 border-red-200',
+    rejected: 'bg-red-50 text-red-500 border-red-200',
   };
   const ic: Record<string,string> = { pending:'🟡', approved:'✅', rejected:'❌' };
   return (
@@ -156,6 +156,12 @@ const ExpensesPage: React.FC = () => {
   const [isFieldAddOpen, setIsFieldAddOpen] = useState(false);
   const [fieldAddForm,   setFieldAddForm]   = useState(EMPTY_FIELD_FORM);
   const [savingFieldAdd, setSavingFieldAdd] = useState(false);
+
+  // ── UI collapse / toggle state (presentation only) ────────────────────────
+  const [showOfficeBulkInfo, setShowOfficeBulkInfo] = useState(false);
+  const [showFieldBulkInfo,  setShowFieldBulkInfo]  = useState(false);
+  const [showAllOfficeCats,  setShowAllOfficeCats]  = useState(false);
+  const [showSpendByPerson,  setShowSpendByPerson]  = useState(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -896,36 +902,36 @@ const ExpensesPage: React.FC = () => {
     const overBudget = budget && used > budget.monthly_limit;
 
     return (
-      <div className="p-4 flex items-start gap-3">
+      <div className="px-3.5 py-2.5 flex items-start gap-2.5">
         <input
           type="checkbox"
           checked={selectedFieldIds.has(exp.id)}
           onChange={() => toggleFieldSelect(exp.id)}
-          className="mt-1.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
+          className="mt-1 h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
         />
-        <div className="flex-1 min-w-0 space-y-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-sm">{empMap[exp.field_boy_id] || '—'}</span>
+        <div className="flex-1 min-w-0 space-y-0.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="font-semibold text-sm leading-tight">{empMap[exp.field_boy_id] || '—'}</span>
             <StatusBadge s={exp.status} />
             {exp.closure_type && (
               <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded capitalize">{exp.closure_type}</span>
             )}
             {overBudget && (
-              <span className="text-[10px] bg-red-100 text-red-700 border border-red-200 px-1.5 py-0.5 rounded font-bold">
+              <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-bold">
                 ⚠️ Over Budget
               </span>
             )}
+            <span className="text-slate-400 text-[11px] ml-auto whitespace-nowrap">{exp.expense_date}</span>
           </div>
-          <p className="text-sm text-slate-600">{leadMap[exp.lead_id] || exp.description || 'Ad-hoc expense'}</p>
-          <div className="flex gap-3 flex-wrap text-xs">
-            <span className="text-slate-500">{exp.expense_date}</span>
-            <span className="text-blue-600 font-medium">{exp.kilometres} km</span>
-            <span className="text-orange-600 font-medium">₹{exp.conveyance_amount}</span>
-            {Number(exp.credit_total) > 0 && <span className="text-green-600 font-medium">Credit ₹{exp.credit_total}</span>}
-            {exp.notes && <span className="text-slate-400 italic">{exp.notes}</span>}
+          <div className="flex items-center gap-2 flex-wrap text-xs leading-tight">
+            <span className="text-slate-500 truncate max-w-[220px]">{leadMap[exp.lead_id] || exp.description || 'Ad-hoc expense'}</span>
+            <span className="text-blue-600 font-medium shrink-0">{exp.kilometres} km</span>
+            <span className="text-orange-600 font-semibold shrink-0">₹{exp.conveyance_amount}</span>
+            {Number(exp.credit_total) > 0 && <span className="text-green-600 font-medium shrink-0">Cr ₹{exp.credit_total}</span>}
+            {exp.notes && <span className="text-slate-400 italic truncate max-w-[140px]">{exp.notes}</span>}
           </div>
           {exp.admin_comment && (
-            <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-1.5 mt-1">
+            <p className="text-[11px] text-red-500 bg-red-50/70 border border-red-100 rounded px-1.5 py-1 mt-0.5">
               💬 {exp.admin_comment}
             </p>
           )}
@@ -935,7 +941,7 @@ const ExpensesPage: React.FC = () => {
             {exp.status === 'pending' && (
               <>
                 <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={() => handleApprove(exp.id)}>✅</Button>
-                <Button size="sm" variant="outline" className="h-7 text-xs text-red-600 border-red-200" onClick={() => { setRejectTarget(exp); setRejectComment(''); }}>❌</Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs text-red-500 border-red-200" onClick={() => { setRejectTarget(exp); setRejectComment(''); }}>❌</Button>
               </>
             )}
             <Button variant="ghost" size="icon" className="h-7 w-7"
@@ -1476,18 +1482,30 @@ const ExpensesPage: React.FC = () => {
 
           {/* ── OFFICE BULK ── */}
           {bulkSubTab === 'office' && <>
-          <div className="flex gap-3 p-4 rounded-xl border border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-900 text-xs text-blue-800 dark:text-blue-300">
-            <FileUp className="h-5 w-5 shrink-0 mt-0.5 text-blue-500" />
-            <div>
-              <p className="font-bold text-sm mb-1">Bulk Upload Office Expenses</p>
-              <ol className="list-decimal ml-4 space-y-0.5">
-                <li>Download the sample Excel template</li>
-                <li>Fill your expense rows (keep column names exactly as-is)</li>
-                <li>Upload — rows validated before saving</li>
-                <li>Review preview, then click Upload to Supabase</li>
-              </ol>
-            </div>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-slate-500">Bulk upload office expenses from an Excel file.</p>
+            <Button size="sm" variant="outline" className="h-7 text-xs shrink-0"
+              onClick={() => setShowOfficeBulkInfo(v => !v)}>
+              <Info className="h-3.5 w-3.5 mr-1" />
+              {showOfficeBulkInfo ? 'Hide Instructions' : 'Show Instructions'}
+              {showOfficeBulkInfo ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
+            </Button>
           </div>
+
+          {showOfficeBulkInfo && (
+            <div className="flex gap-3 p-4 rounded-xl border border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-900 text-xs text-blue-800 dark:text-blue-300">
+              <FileUp className="h-5 w-5 shrink-0 mt-0.5 text-blue-500" />
+              <div>
+                <p className="font-bold text-sm mb-1">Bulk Upload Office Expenses</p>
+                <ol className="list-decimal ml-4 space-y-0.5">
+                  <li>Download the sample Excel template</li>
+                  <li>Fill your expense rows (keep column names exactly as-is)</li>
+                  <li>Upload — rows validated before saving</li>
+                  <li>Review preview, then click Upload to Supabase</li>
+                </ol>
+              </div>
+            </div>
+          )}
 
           {/* Step 1 — Download sample */}
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 space-y-3">
@@ -1501,9 +1519,21 @@ const ExpensesPage: React.FC = () => {
             <p className="text-xs text-slate-400 ml-8">Category &amp; Spent By Name are free text — type anything, no fixed list.</p>
             <div className="ml-8">
               <div className="flex flex-wrap gap-1 mb-3">
-                {COMMON_OFFICE_CATS.map(c => (
+                {(showAllOfficeCats ? COMMON_OFFICE_CATS : COMMON_OFFICE_CATS.slice(0, 4)).map(c => (
                   <span key={c} className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded text-[10px]">{c}</span>
                 ))}
+                {!showAllOfficeCats && (
+                  <button onClick={() => setShowAllOfficeCats(true)}
+                    className="px-2 py-0.5 text-[10px] text-blue-600 hover:underline">
+                    +{COMMON_OFFICE_CATS.length - 4} more
+                  </button>
+                )}
+                {showAllOfficeCats && (
+                  <button onClick={() => setShowAllOfficeCats(false)}
+                    className="px-2 py-0.5 text-[10px] text-blue-600 hover:underline">
+                    Show less
+                  </button>
+                )}
               </div>
               <Button size="sm" onClick={handleSampleDownload} className="bg-blue-600 hover:bg-blue-700">
                 <Download className="h-4 w-4 mr-1.5" />Download Sample Excel
@@ -1635,18 +1665,30 @@ const ExpensesPage: React.FC = () => {
 
           {/* ── FIELD BULK ── */}
           {bulkSubTab === 'field' && <>
-          <div className="flex gap-3 p-4 rounded-xl border border-violet-200 bg-violet-50 dark:bg-violet-950/20 dark:border-violet-900 text-xs text-violet-800 dark:text-violet-300">
-            <FileUp className="h-5 w-5 shrink-0 mt-0.5 text-violet-500" />
-            <div>
-              <p className="font-bold text-sm mb-1">Bulk Upload Field Expenses</p>
-              <ol className="list-decimal ml-4 space-y-0.5">
-                <li>Download template — includes your registered employees list</li>
-                <li>Fill Date, Employee Name, KM, Conveyance, Credit, Description</li>
-                <li>Upload — employee name matched to ID automatically</li>
-                <li>Entries saved as <strong>Approved</strong> directly (admin override)</li>
-              </ol>
-            </div>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-slate-500">Bulk upload field expenses from an Excel file.</p>
+            <Button size="sm" variant="outline" className="h-7 text-xs shrink-0"
+              onClick={() => setShowFieldBulkInfo(v => !v)}>
+              <Info className="h-3.5 w-3.5 mr-1" />
+              {showFieldBulkInfo ? 'Hide Instructions' : 'Show Instructions'}
+              {showFieldBulkInfo ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
+            </Button>
           </div>
+
+          {showFieldBulkInfo && (
+            <div className="flex gap-3 p-4 rounded-xl border border-violet-200 bg-violet-50 dark:bg-violet-950/20 dark:border-violet-900 text-xs text-violet-800 dark:text-violet-300">
+              <FileUp className="h-5 w-5 shrink-0 mt-0.5 text-violet-500" />
+              <div>
+                <p className="font-bold text-sm mb-1">Bulk Upload Field Expenses</p>
+                <ol className="list-decimal ml-4 space-y-0.5">
+                  <li>Download template — includes your registered employees list</li>
+                  <li>Fill Date, Employee Name, KM, Conveyance, Credit, Description</li>
+                  <li>Upload — employee name matched to ID automatically</li>
+                  <li>Entries saved as <strong>Approved</strong> directly (admin override)</li>
+                </ol>
+              </div>
+            </div>
+          )}
 
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 space-y-3">
             <div className="flex items-center gap-2">
@@ -1822,24 +1864,46 @@ const ExpensesPage: React.FC = () => {
             );
           })()}
 
-          {/* Spend by Person — grouped by source to avoid merging same names */}
+          {/* Spend by Person — collapsed by default, split into Field / Office columns */}
           {spendByPerson.length > 0 && (
             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4">
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">👤 Total Spent — By Person</p>
-              <div className="space-y-1">
-                {spendByPerson.map(({ name, source, amount }) => (
-                  <div key={`${name}__${source}`} className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-700">
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${
-                      source==='Field'    ? 'bg-blue-100 text-blue-700' :
-                      source==='Employee' ? 'bg-violet-100 text-violet-700' :
-                                             'bg-slate-100 text-slate-600'}`}>
-                      {source}
-                    </span>
-                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex-1 truncate">{name}</span>
-                    <span className="text-xs font-black text-red-600 whitespace-nowrap">−₹{amount.toFixed(0)}</span>
-                  </div>
-                ))}
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">👤 Total Spent — By Person</p>
+                <Button size="sm" variant="outline" className="h-7 text-xs shrink-0"
+                  onClick={() => setShowSpendByPerson(v => !v)}>
+                  {showSpendByPerson ? <EyeOff className="h-3.5 w-3.5 mr-1" /> : <Eye className="h-3.5 w-3.5 mr-1" />}
+                  {showSpendByPerson ? 'Hide' : 'View'}
+                </Button>
               </div>
+
+              {showSpendByPerson && (() => {
+                const fieldPeople = spendByPerson.filter(p => p.source === 'Field');
+                const officePeople = spendByPerson.filter(p => p.source !== 'Field');
+                const renderCol = (list: typeof spendByPerson, label: string) => (
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">{label}</p>
+                    {list.length === 0
+                      ? <p className="text-xs text-slate-300 italic px-1">No entries</p>
+                      : list.map(({ name, source, amount }) => (
+                        <div key={`${name}__${source}`} className="flex items-center gap-2 px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-700">
+                          {source !== 'Field' && (
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 ${source === 'Employee' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'}`}>
+                              {source}
+                            </span>
+                          )}
+                          <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex-1 truncate">{name}</span>
+                          <span className="text-xs font-black text-rose-500 whitespace-nowrap">−₹{amount.toFixed(0)}</span>
+                        </div>
+                      ))}
+                  </div>
+                );
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                    {renderCol(fieldPeople, '🚗 Field')}
+                    {renderCol(officePeople, '🏢 Office / Employee')}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
