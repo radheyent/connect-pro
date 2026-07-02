@@ -327,15 +327,17 @@ const ExpensesPage: React.FC = () => {
     return withBalance.reverse();
   }, [fieldExp, officeExp, empExp, adminCredits, empMap, leadMap]);
 
-  // ── Spend totals per person (for Ledger tab summary) ───────────────────────
+  // ── Spend totals per person, split by source (avoids merging same name across Field/Office) ──
   const spendByPerson = useMemo(() => {
-    const totals: Record<string, number> = {};
+    const totals: Record<string, { name: string; source: string; amount: number }> = {};
     ledger.forEach(r => {
-      if (r.expense < 0) {
-        totals[r.person] = (totals[r.person] || 0) + Math.abs(r.expense);
+      if (r.expense < 0 && r.person && r.person !== '—') {
+        const key = `${r.person}__${r.source}`;
+        if (!totals[key]) totals[key] = { name: r.person, source: r.source, amount: 0 };
+        totals[key].amount += Math.abs(r.expense);
       }
     });
-    return Object.entries(totals).sort((a, b) => b[1] - a[1]); // highest spender first
+    return Object.values(totals).sort((a, b) => b.amount - a.amount); // highest spender first
   }, [ledger]);
 
   // ── Per-employee budget usage this month ───────────────────────────────────
@@ -724,6 +726,7 @@ const ExpensesPage: React.FC = () => {
   const [fieldBulkDone,      setFieldBulkDone]      = useState(false);
   const [bulkSubTab,         setBulkSubTab]          = useState<'office'|'field'>('office');
   const [ledgerSearch,       setLedgerSearch]        = useState('');
+  const [ledgerSourceFilter, setLedgerSourceFilter]  = useState<'all'|'Field'|'Office'|'Employee'|'Credit'>('all');
   const [selectedFieldIds,   setSelectedFieldIds]    = useState<Set<string>>(new Set());
   const [selectedOfficeIds,  setSelectedOfficeIds]   = useState<Set<string>>(new Set());
   const [bulkDeleting,       setBulkDeleting]        = useState(false);
@@ -1755,34 +1758,58 @@ const ExpensesPage: React.FC = () => {
       {/* ── LEDGER ── */}
       {!loading && tab === 'Ledger' && (
         <div className="space-y-4">
-          {/* Search bar */}
+          {/* Source Filter + Search bar */}
           {(() => {
+            const bySource = ledgerSourceFilter === 'all'
+              ? ledger
+              : ledger.filter(r => r.source === ledgerSourceFilter);
             const fl = ledgerSearch
-              ? ledger.filter(r => (r.person + r.desc + r.source + r.date + r.category).toLowerCase().includes(ledgerSearch.toLowerCase()))
-              : ledger;
+              ? bySource.filter(r => (r.person + r.desc + r.source + r.date + r.category).toLowerCase().includes(ledgerSearch.toLowerCase()))
+              : bySource;
             const flExp    = fl.reduce((s,r) => s + r.expense, 0);
             const flCredit = fl.reduce((s,r) => s + r.credit, 0);
             const flNet    = flCredit + flExp;
             return (
               <div className="space-y-2">
                 <div className="flex items-center gap-2 flex-wrap">
+                  {/* Source filter — choose first */}
+                  <Select value={ledgerSourceFilter} onValueChange={(v: any) => setLedgerSourceFilter(v)}>
+                    <SelectTrigger className="w-40 h-9 text-xs shrink-0">
+                      <SelectValue placeholder="All Sources" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">📋 All Sources</SelectItem>
+                      <SelectItem value="Field">🚗 Field Expense</SelectItem>
+                      <SelectItem value="Office">🏢 Office Expense</SelectItem>
+                      <SelectItem value="Employee">👔 Employee Expense</SelectItem>
+                      <SelectItem value="Credit">💰 Credit</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {/* Search — filters within chosen source */}
                   <div className="relative flex-1 max-w-xs">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                     <input
                       value={ledgerSearch}
                       onChange={e => setLedgerSearch(e.target.value)}
-                      placeholder="Search by name, category, description…"
+                      placeholder={ledgerSourceFilter === 'all' ? 'Search name, category, description…' : `Search within ${ledgerSourceFilter}…`}
                       className="w-full pl-9 pr-8 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     {ledgerSearch && (
                       <button onClick={() => setLedgerSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-500 text-lg leading-none">&times;</button>
                     )}
                   </div>
-                  <span className="text-xs text-slate-400 whitespace-nowrap">
-                    {ledgerSearch ? `${fl.length} of ${ledger.length} entries` : `${ledger.length} entries`}
+
+                  {(ledgerSourceFilter !== 'all' || ledgerSearch) && (
+                    <Button size="sm" variant="ghost" className="h-9 text-xs text-slate-400"
+                      onClick={() => { setLedgerSourceFilter('all'); setLedgerSearch(''); }}>Clear</Button>
+                  )}
+
+                  <span className="text-xs text-slate-400 whitespace-nowrap ml-auto">
+                    {fl.length} of {ledger.length} entries
                   </span>
                 </div>
-                {ledgerSearch && (
+                {(ledgerSourceFilter !== 'all' || ledgerSearch) && (
                   <div className="flex gap-3 flex-wrap text-xs px-1 py-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
                     <span className="text-red-600 font-bold">Expense: −₹{Math.abs(flExp).toFixed(0)}</span>
                     <span className="text-green-600 font-bold">Credit: +₹{flCredit.toFixed(0)}</span>
@@ -1795,14 +1822,20 @@ const ExpensesPage: React.FC = () => {
             );
           })()}
 
-          {/* Spend by Person — who spent how much */}
+          {/* Spend by Person — grouped by source to avoid merging same names */}
           {spendByPerson.length > 0 && (
             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4">
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">👤 Total Spent — By Person</p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                {spendByPerson.map(([name, amount]) => (
-                  <div key={name} className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-700">
-                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{name}</span>
+              <div className="space-y-1">
+                {spendByPerson.map(({ name, source, amount }) => (
+                  <div key={`${name}__${source}`} className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-700">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                      source==='Field'    ? 'bg-blue-100 text-blue-700' :
+                      source==='Employee' ? 'bg-violet-100 text-violet-700' :
+                                             'bg-slate-100 text-slate-600'}`}>
+                      {source}
+                    </span>
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex-1 truncate">{name}</span>
                     <span className="text-xs font-black text-red-600 whitespace-nowrap">−₹{amount.toFixed(0)}</span>
                   </div>
                 ))}
@@ -1853,10 +1886,13 @@ const ExpensesPage: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                 {(() => {
+                    const bySource = ledgerSourceFilter === 'all'
+                      ? ledger
+                      : ledger.filter(r => r.source === ledgerSourceFilter);
                     const fl = ledgerSearch
-                      ? ledger.filter(r => (r.person + r.desc + r.source + r.date + r.category).toLowerCase().includes(ledgerSearch.toLowerCase()))
-                      : ledger;
-                    if (fl.length === 0) return (<tr><td colSpan={8} className="py-10 text-center text-slate-400 text-sm">{ledgerSearch ? `No results for "${ledgerSearch}"` : 'No approved entries'}</td></tr>);
+                      ? bySource.filter(r => (r.person + r.desc + r.source + r.date + r.category).toLowerCase().includes(ledgerSearch.toLowerCase()))
+                      : bySource;
+                    if (fl.length === 0) return (<tr><td colSpan={8} className="py-10 text-center text-slate-400 text-sm">{ledgerSearch || ledgerSourceFilter !== 'all' ? 'No matching entries' : 'No approved entries'}</td></tr>);
                     return fl.map((r, i) => (
                     <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/40 align-top">
                       <td className="px-3 py-2 whitespace-nowrap text-slate-500 text-xs">{r.date}</td>
@@ -1864,6 +1900,7 @@ const ExpensesPage: React.FC = () => {
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${
                           r.source==='Field'    ? 'bg-blue-100 text-blue-700' :
                           r.source==='Employee' ? 'bg-violet-100 text-violet-700' :
+                          r.source==='Credit'   ? 'bg-green-100 text-green-700' :
                                                   'bg-slate-100 text-slate-600'}`}>
                           {r.source}
                         </span>
