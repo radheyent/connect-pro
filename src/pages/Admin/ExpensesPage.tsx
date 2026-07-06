@@ -9,11 +9,22 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { CheckCircle, XCircle, Trash2, Edit, Download, Plus, Settings, TrendingUp, TrendingDown, IndianRupee, Users, ShieldAlert, Upload, FileUp, AlertCircle, CheckCircle2, Search, ChevronDown, ChevronUp, Info, Eye, EyeOff } from 'lucide-react';
+import { CheckCircle, XCircle, Trash2, Edit, Download, Plus, Settings, TrendingUp, TrendingDown, IndianRupee, Users, ShieldAlert, Upload, FileUp, AlertCircle, CheckCircle2, Search, LayoutDashboard, Clock3, Car, Building2, Wallet, FileSpreadsheet, BookOpenText, Sparkles } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const TABS = ['Overview', 'Pending', 'Field Expenses', 'Office Expenses', 'Credits', 'Bulk Upload', 'Ledger', 'Budget'] as const;
 type TabType = typeof TABS[number];
+
+const TAB_ICONS: Record<TabType, React.ElementType> = {
+  'Overview':        LayoutDashboard,
+  'Pending':         Clock3,
+  'Field Expenses':  Car,
+  'Office Expenses': Building2,
+  'Credits':         Wallet,
+  'Bulk Upload':     FileSpreadsheet,
+  'Ledger':          BookOpenText,
+  'Budget':          IndianRupee,
+};
 
 const OFFICE_CATS = [
   'tea_refreshments','stationary','rent',
@@ -80,13 +91,13 @@ const EMPTY_FIELD_FORM = {
 
 const StatusBadge = ({ s }: { s: string }) => {
   const c: Record<string,string> = {
-    pending:  'bg-yellow-100 text-yellow-800 border-yellow-200',
-    approved: 'bg-green-100 text-green-800 border-green-200',
-    rejected: 'bg-red-50 text-red-500 border-red-200',
+    pending:  'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20',
+    approved: 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20',
+    rejected: 'bg-rose-50 text-rose-500 border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/20',
   };
   const ic: Record<string,string> = { pending:'🟡', approved:'✅', rejected:'❌' };
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full border ${c[s] || ''}`}>
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full border shadow-sm ${c[s] || ''}`}>
       {ic[s]} {s}
     </span>
   );
@@ -126,6 +137,11 @@ const ExpensesPage: React.FC = () => {
   const [dateFrom,    setDateFrom]    = useState('');
   const [dateTo,      setDateTo]      = useState('');
   const [empFilter,   setEmpFilter]   = useState('all');
+  const [officeSearch,   setOfficeSearch]   = useState('');
+  const [officeDateFrom, setOfficeDateFrom] = useState('');
+  const [officeDateTo,   setOfficeDateTo]   = useState('');
+  const [showBulkHelp,   setShowBulkHelp]   = useState(false);
+  const [showSpendByPerson, setShowSpendByPerson] = useState(false);
   const [monthView,   setMonthView]   = useState(() => new Date().toISOString().slice(0,7));
 
   // Modal states
@@ -156,12 +172,6 @@ const ExpensesPage: React.FC = () => {
   const [isFieldAddOpen, setIsFieldAddOpen] = useState(false);
   const [fieldAddForm,   setFieldAddForm]   = useState(EMPTY_FIELD_FORM);
   const [savingFieldAdd, setSavingFieldAdd] = useState(false);
-
-  // ── UI collapse / toggle state (presentation only) ────────────────────────
-  const [showOfficeBulkInfo, setShowOfficeBulkInfo] = useState(false);
-  const [showFieldBulkInfo,  setShowFieldBulkInfo]  = useState(false);
-  const [showAllOfficeCats,  setShowAllOfficeCats]  = useState(false);
-  const [showSpendByPerson,  setShowSpendByPerson]  = useState(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -272,6 +282,17 @@ const ExpensesPage: React.FC = () => {
     if (dateTo   && e.expense_date > dateTo)   return false;
     return true;
   }), [fieldExp, empFilter, dateFrom, dateTo]);
+
+  const filteredOffice = useMemo(() => officeExp.filter(e => {
+    if (officeDateFrom && e.expense_date < officeDateFrom) return false;
+    if (officeDateTo   && e.expense_date > officeDateTo)   return false;
+    if (officeSearch) {
+      const q = officeSearch.toLowerCase();
+      const hay = `${e.category||''} ${e.custom_category||''} ${e.spent_by_name||''} ${e.description||''} ${e.remarks||''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  }), [officeExp, officeDateFrom, officeDateTo, officeSearch]);
 
   const ledger = useMemo(() => {
     const rows = [
@@ -900,57 +921,60 @@ const ExpensesPage: React.FC = () => {
     const budget = budgets[exp.field_boy_id];
     const used   = empBudgetUsage[exp.field_boy_id] || 0;
     const overBudget = budget && used > budget.monthly_limit;
+    const name = empMap[exp.field_boy_id] || '—';
+    const accent = exp.status === 'approved' ? 'bg-emerald-500' : exp.status === 'rejected' ? 'bg-rose-500' : 'bg-amber-400';
 
     return (
-      <div className="px-3.5 py-2.5 flex items-start gap-2.5">
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200/70 dark:border-white/10 bg-white/85 dark:bg-slate-900/60 backdrop-blur-xl p-3 pl-4 flex items-start gap-2.5 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
+        <div className={`absolute left-0 top-0 bottom-0 w-1 ${accent}`} />
         <input
           type="checkbox"
           checked={selectedFieldIds.has(exp.id)}
           onChange={() => toggleFieldSelect(exp.id)}
-          className="mt-1 h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
+          className="mt-1 h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
         />
+        <div className="h-8 w-8 rounded-full bg-gradient-to-br from-indigo-500 to-cyan-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 shadow-sm">
+          {name.slice(0, 2).toUpperCase()}
+        </div>
         <div className="flex-1 min-w-0 space-y-0.5">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="font-semibold text-sm leading-tight">{empMap[exp.field_boy_id] || '—'}</span>
+            <span className="font-semibold text-xs text-slate-800 dark:text-slate-100">{name}</span>
             <StatusBadge s={exp.status} />
-            {exp.closure_type && (
-              <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded capitalize">{exp.closure_type}</span>
-            )}
             {overBudget && (
-              <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-bold">
+              <span className="text-[10px] bg-rose-50 text-rose-500 border border-rose-200 px-1.5 py-0.5 rounded font-bold">
                 ⚠️ Over Budget
               </span>
             )}
-            <span className="text-slate-400 text-[11px] ml-auto whitespace-nowrap">{exp.expense_date}</span>
+            <span className="text-[11px] text-slate-400 ml-auto whitespace-nowrap">{exp.expense_date}</span>
           </div>
-          <div className="flex items-center gap-2 flex-wrap text-xs leading-tight">
-            <span className="text-slate-500 truncate max-w-[220px]">{leadMap[exp.lead_id] || exp.description || 'Ad-hoc expense'}</span>
-            <span className="text-blue-600 font-medium shrink-0">{exp.kilometres} km</span>
-            <span className="text-orange-600 font-semibold shrink-0">₹{exp.conveyance_amount}</span>
-            {Number(exp.credit_total) > 0 && <span className="text-green-600 font-medium shrink-0">Cr ₹{exp.credit_total}</span>}
-            {exp.notes && <span className="text-slate-400 italic truncate max-w-[140px]">{exp.notes}</span>}
+          <div className="flex items-center gap-2 flex-wrap text-[11px]">
+            <span className="text-slate-500 dark:text-slate-400 truncate">{leadMap[exp.lead_id] || exp.description || 'Ad-hoc expense'}</span>
+            <span className="text-slate-300">·</span>
+            <span className="text-indigo-500 font-medium whitespace-nowrap">{exp.kilometres} km</span>
+            <span className="text-rose-500 font-bold whitespace-nowrap">-₹{exp.conveyance_amount}</span>
+            {Number(exp.credit_total) > 0 && <span className="text-emerald-500 font-bold whitespace-nowrap">+₹{exp.credit_total}</span>}
           </div>
           {exp.admin_comment && (
-            <p className="text-[11px] text-red-500 bg-red-50/70 border border-red-100 rounded px-1.5 py-1 mt-0.5">
+            <p className="text-[11px] text-rose-500 bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/20 rounded-lg px-1.5 py-1 mt-1">
               💬 {exp.admin_comment}
             </p>
           )}
         </div>
         {showActions && (
-          <div className="flex gap-1 shrink-0">
+          <div className="flex gap-0.5 shrink-0">
             {exp.status === 'pending' && (
               <>
-                <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={() => handleApprove(exp.id)}>✅</Button>
-                <Button size="sm" variant="outline" className="h-7 text-xs text-red-500 border-red-200" onClick={() => { setRejectTarget(exp); setRejectComment(''); }}>❌</Button>
+                <Button size="sm" className="h-6 text-[11px] px-1.5 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 shadow-md shadow-emerald-500/25 border-0" onClick={() => handleApprove(exp.id)}>✅</Button>
+                <Button size="sm" variant="outline" className="h-6 text-[11px] px-1.5 text-rose-500 border-rose-200" onClick={() => { setRejectTarget(exp); setRejectComment(''); }}>❌</Button>
               </>
             )}
-            <Button variant="ghost" size="icon" className="h-7 w-7"
+            <Button variant="ghost" size="icon" className="h-6 w-6"
               onClick={() => setEditFieldItem({ ...exp })}>
-              <Edit className="h-3.5 w-3.5 text-slate-500" />
+              <Edit className="h-3 w-3 text-slate-500" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400"
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-rose-400"
               onClick={() => setDeleteTarget({ id: exp.id, table: 'field_expenses', name: empMap[exp.field_boy_id] || 'expense' })}>
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 className="h-3 w-3" />
             </Button>
           </div>
         )}
@@ -960,78 +984,155 @@ const ExpensesPage: React.FC = () => {
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-4">
+    <div className="relative space-y-5">
+      {/* Ambient background glow */}
+      <div aria-hidden className="pointer-events-none absolute -top-24 -left-16 h-72 w-72 rounded-full bg-indigo-500/20 blur-[100px] -z-10" />
+      <div aria-hidden className="pointer-events-none absolute -top-10 right-0 h-64 w-64 rounded-full bg-cyan-400/10 blur-[100px] -z-10" />
+
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-bold dark:text-white">Expenses</h1>
-        <Button variant="outline" size="sm" onClick={handleExport}>
+      <div className="flex items-center justify-between flex-wrap gap-3 rounded-2xl border border-slate-200/70 dark:border-white/10 bg-white/80 dark:bg-slate-900/60 backdrop-blur-xl px-4 py-3.5 shadow-lg shadow-slate-200/40 dark:shadow-black/30">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500 via-blue-500 to-cyan-400 flex items-center justify-center shadow-md shadow-indigo-500/30 shrink-0">
+            <Sparkles className="h-5 w-5 text-white" />
+          </div>
+          <div>
+            <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight bg-gradient-to-r from-slate-900 via-indigo-700 to-slate-900 dark:from-white dark:via-indigo-300 dark:to-white bg-clip-text text-transparent">
+              Expenses
+            </h1>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium -mt-0.5">Field &amp; office expense management</p>
+          </div>
+        </div>
+        <Button size="sm" onClick={handleExport}
+          className="bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 shadow-md shadow-indigo-500/25 border-0 text-white">
           <Download className="h-4 w-4 mr-1.5" />Export Excel
         </Button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-0 border-b border-slate-200 dark:border-slate-700 overflow-x-auto">
-        {TABS.map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={cn(
-              "px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors",
-              tab === t
-                ? "border-blue-600 text-blue-600"
-                : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-            )}>
-            {t}
-            {t === 'Pending' && pendingCount > 0 && (
-              <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-red-500 text-white rounded-full">{pendingCount}</span>
-            )}
-          </button>
-        ))}
+      {/* Tabs — command-tile navigation */}
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 snap-x">
+        {TABS.map(t => {
+          const Icon = TAB_ICONS[t];
+          const active = tab === t;
+          const count: Record<TabType, number | null> = {
+            'Overview': null,
+            'Pending': pendingCount,
+            'Field Expenses': fieldExp.length,
+            'Office Expenses': officeExp.length,
+            'Credits': adminCredits.length,
+            'Bulk Upload': null,
+            'Ledger': ledger.length,
+            'Budget': employees.length,
+          }[t] ?? null;
+          return (
+            <button key={t} onClick={() => setTab(t)}
+              className={cn(
+                "group relative shrink-0 snap-start flex items-center gap-2.5 rounded-2xl px-3.5 py-2.5 min-w-[128px] transition-all duration-200 border backdrop-blur-xl",
+                active
+                  ? "bg-gradient-to-br from-indigo-600 via-blue-600 to-cyan-500 border-transparent shadow-lg shadow-indigo-500/30 -translate-y-0.5"
+                  : "bg-white/70 dark:bg-slate-900/50 border-slate-200/70 dark:border-white/10 hover:border-indigo-300/60 dark:hover:border-indigo-400/30 hover:-translate-y-0.5 shadow-sm"
+              )}>
+              <div className={cn(
+                "h-8 w-8 rounded-xl flex items-center justify-center shrink-0 transition-colors",
+                active ? "bg-white/20" : "bg-slate-100 dark:bg-white/5 group-hover:bg-indigo-50 dark:group-hover:bg-indigo-500/10"
+              )}>
+                <Icon className={cn("h-4 w-4", active ? "text-white" : "text-slate-500 dark:text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400")} />
+              </div>
+              <div className="text-left min-w-0">
+                <p className={cn("text-[12.5px] font-bold leading-tight whitespace-nowrap", active ? "text-white" : "text-slate-700 dark:text-slate-200")}>{t}</p>
+                <p className={cn("text-[10px] font-medium leading-tight mt-0.5", active ? "text-white/70" : "text-slate-400")}>
+                  {count === null ? '—' : t === 'Pending' && count > 0 ? `${count} pending` : `${count} entries`}
+                </p>
+              </div>
+              {t === 'Pending' && pendingCount > 0 && (
+                <span className={cn(
+                  "absolute -top-1.5 -right-1.5 h-5 min-w-[20px] px-1 flex items-center justify-center text-[10px] font-bold rounded-full ring-2",
+                  active ? "bg-white text-indigo-600 ring-indigo-600" : "bg-gradient-to-r from-rose-500 to-red-500 text-white ring-white dark:ring-slate-950 animate-pulse"
+                )}>{pendingCount}</span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {loading && <div className="py-16 text-center text-slate-400">Loading...</div>}
+      {loading && (
+        <div className="py-16 flex flex-col items-center justify-center gap-3 text-slate-400">
+          <div className="h-8 w-8 rounded-full border-2 border-indigo-500/30 border-t-indigo-500 animate-spin" />
+          <span className="text-xs font-medium">Loading...</span>
+        </div>
+      )}
 
       {/* ── OVERVIEW ── */}
       {!loading && tab === 'Overview' && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
             {[
-              { label: 'Field Conveyance',  val: `−₹${summary.fieldConv.toFixed(0)}`, color: 'text-red-600' },
-              { label: 'Office Expenses',   val: `−₹${summary.office.toFixed(0)}`,    color: 'text-red-600' },
-              { label: 'Credit Collected',  val: `+₹${summary.credit.toFixed(0)}`,    color: 'text-green-600' },
-              { label: 'Total KM (month)',  val: `${summary.km.toFixed(1)} km`,       color: 'text-blue-600' },
-            ].map(({ label, val, color }) => (
-              <Card key={label}>
-                <CardContent className="p-3">
-                  <p className={`text-lg font-black ${color}`}>{val}</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">{label} — This Month</p>
-                </CardContent>
-              </Card>
+              { label: 'Field Conveyance',  val: `-₹${summary.fieldConv.toFixed(0)}`, color: 'text-rose-500',   icon: Car,        glow: 'from-rose-500/10 to-transparent' },
+              { label: 'Office Expenses',   val: `-₹${summary.office.toFixed(0)}`,    color: 'text-rose-500',   icon: Building2,  glow: 'from-rose-500/10 to-transparent' },
+              { label: 'Credit Collected',  val: `+₹${summary.credit.toFixed(0)}`,    color: 'text-emerald-500',icon: Wallet,     glow: 'from-emerald-500/10 to-transparent' },
+              { label: 'Total KM (month)',  val: `${summary.km.toFixed(1)} km`,       color: 'text-indigo-500', icon: TrendingUp, glow: 'from-indigo-500/10 to-transparent' },
+            ].map(({ label, val, color, icon: Icon, glow }) => (
+              <div key={label} className={`relative overflow-hidden rounded-2xl border border-slate-200/70 dark:border-white/10 bg-white/90 dark:bg-slate-900/70 backdrop-blur-xl shadow-lg shadow-slate-200/40 dark:shadow-black/40 p-3`}>
+                <div className={`absolute inset-0 bg-gradient-to-br ${glow} pointer-events-none`} />
+                <div className="relative flex items-start justify-between gap-2">
+                  <div>
+                    <p className={`text-lg font-black ${color}`}>{val}</p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{label} — This Month</p>
+                  </div>
+                  <Icon className={`h-4 w-4 shrink-0 ${color} opacity-70`} />
+                </div>
+              </div>
             ))}
           </div>
 
-          <div className={`rounded-xl p-4 border flex items-center justify-between gap-4 flex-wrap ${
+          <div className={`relative overflow-hidden rounded-2xl p-5 border backdrop-blur-xl shadow-lg ${
             summary.profit >= 0
-              ? 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800'
-              : 'bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800'
+              ? 'bg-gradient-to-br from-emerald-50/90 to-white/60 dark:from-emerald-500/10 dark:to-slate-900/60 border-emerald-200/70 dark:border-emerald-500/20 shadow-emerald-200/30 dark:shadow-black/30'
+              : 'bg-gradient-to-br from-rose-50/90 to-white/60 dark:from-rose-500/10 dark:to-slate-900/60 border-rose-200/70 dark:border-rose-500/20 shadow-rose-200/30 dark:shadow-black/30'
           }`}>
-            <div className="flex items-center gap-3">
-              {summary.profit >= 0
-                ? <TrendingUp className="h-6 w-6 text-green-600 shrink-0" />
-                : <TrendingDown className="h-6 w-6 text-red-500 shrink-0" />}
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">This Month — Net Profit</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">Credit Collected − (Field + Office Expense)</p>
-                <p className="text-[11px] text-slate-400">₹{summary.credit.toFixed(0)} − ₹{summary.totalExpense.toFixed(0)}</p>
+            <div className="flex items-center gap-5 flex-wrap">
+              {/* Ratio ring */}
+              <div className="relative h-20 w-20 shrink-0 rounded-full grid place-items-center"
+                style={{
+                  background: `conic-gradient(${summary.profit >= 0 ? '#10b981' : '#f43f5e'} ${Math.max(0, Math.min(100, Math.round((summary.credit / ((summary.credit + summary.totalExpense) || 1)) * 100)))}%, rgba(148,163,184,0.25) 0)`
+                }}>
+                <div className="h-14 w-14 rounded-full bg-white dark:bg-slate-950 grid place-items-center">
+                  {summary.profit >= 0
+                    ? <TrendingUp className="h-6 w-6 text-emerald-500" />
+                    : <TrendingDown className="h-6 w-6 text-rose-500" />}
+                </div>
+              </div>
+
+              <div className="flex-1 min-w-[180px]">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">This Month · Net P&amp;L</p>
+                <p className={`text-3xl font-black mt-0.5 ${summary.profit >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {summary.profit >= 0 ? '+' : ''}₹{Math.abs(summary.profit).toFixed(0)}
+                </p>
+                <p className={`inline-flex items-center gap-1 text-[11px] font-bold mt-1 px-2 py-0.5 rounded-full ${summary.profit >= 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                  {summary.profit >= 0 ? '▲ Profitable' : '▼ Loss'}
+                </p>
+              </div>
+
+              <div className="w-full sm:w-56 shrink-0 space-y-2">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-slate-400">Credit In</span>
+                  <span className="font-bold text-emerald-500">₹{summary.credit.toFixed(0)}</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-slate-200/60 dark:bg-white/5 overflow-hidden">
+                  <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500"
+                    style={{ width: `${Math.max(2, Math.min(100, Math.round((summary.credit / ((summary.credit + summary.totalExpense) || 1)) * 100)))}%` }} />
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-slate-400">Expense Out</span>
+                  <span className="font-bold text-rose-500">₹{summary.totalExpense.toFixed(0)}</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-slate-200/60 dark:bg-white/5 overflow-hidden">
+                  <div className="h-full rounded-full bg-gradient-to-r from-rose-400 to-rose-500"
+                    style={{ width: `${Math.max(2, Math.min(100, Math.round((summary.totalExpense / ((summary.credit + summary.totalExpense) || 1)) * 100)))}%` }} />
+                </div>
               </div>
             </div>
-            <div className="text-right">
-              <p className={`text-2xl font-black ${summary.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                {summary.profit >= 0 ? '+' : ''}₹{Math.abs(summary.profit).toFixed(0)}
-              </p>
-              <p className={`text-[11px] font-semibold mt-0.5 ${summary.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                {summary.profit >= 0 ? '▲ Profitable' : '▼ Loss'}
-              </p>
-            </div>
           </div>
+
 
           <div className="grid grid-cols-2 gap-2.5">
             <Card>
@@ -1067,10 +1168,10 @@ const ExpensesPage: React.FC = () => {
             <CardContent className="space-y-2.5 px-4 pb-4">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {[
-                  { label: 'Field Conveyance', val: `−₹${monthSummary.fieldConv.toFixed(0)}`, color: 'text-red-600' },
-                  { label: 'Office Expenses',  val: `−₹${monthSummary.office.toFixed(0)}`,    color: 'text-red-600' },
+                  { label: 'Field Conveyance', val: `-₹${monthSummary.fieldConv.toFixed(0)}`, color: 'text-red-600' },
+                  { label: 'Office Expenses',  val: `-₹${monthSummary.office.toFixed(0)}`,    color: 'text-red-600' },
                   { label: 'Credit Collected', val: `+₹${monthSummary.credit.toFixed(0)}`,    color: 'text-green-600' },
-                  { label: 'Net P&L',          val: `${monthSummary.profit >= 0 ? '+' : '−'}₹${Math.abs(monthSummary.profit).toFixed(0)}`,
+                  { label: 'Net P&L',          val: `${monthSummary.profit >= 0 ? '+' : '-'}₹${Math.abs(monthSummary.profit).toFixed(0)}`,
                     color: monthSummary.profit >= 0 ? 'text-green-600' : 'text-red-600' },
                 ].map(({ label, val, color }) => (
                   <div key={label} className="bg-slate-50 dark:bg-slate-800 rounded-lg p-2.5 border border-slate-100 dark:border-slate-700">
@@ -1098,11 +1199,11 @@ const ExpensesPage: React.FC = () => {
                             className={`hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer ${monthView === m ? 'bg-blue-50 dark:bg-blue-950/20' : ''}`}
                             onClick={() => setMonthView(m)}>
                             <td className="px-2 py-2 font-semibold">{m}</td>
-                            <td className="px-2 py-2 text-red-600 font-medium">−₹{s.fieldConv.toFixed(0)}</td>
-                            <td className="px-2 py-2 text-red-500 font-medium">−₹{s.office.toFixed(0)}</td>
+                            <td className="px-2 py-2 text-red-600 font-medium">-₹{s.fieldConv.toFixed(0)}</td>
+                            <td className="px-2 py-2 text-red-500 font-medium">-₹{s.office.toFixed(0)}</td>
                             <td className="px-2 py-2 text-green-600 font-medium">+₹{s.credit.toFixed(0)}</td>
                             <td className={`px-2 py-2 font-black ${s.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              {s.profit >= 0 ? '+' : '−'}₹{Math.abs(s.profit).toFixed(0)}
+                              {s.profit >= 0 ? '+' : '-'}₹{Math.abs(s.profit).toFixed(0)}
                             </td>
                           </tr>
                         );
@@ -1122,48 +1223,52 @@ const ExpensesPage: React.FC = () => {
         const pendingEmp   = empExp.filter(e => e.status === 'pending');
         const total = pendingField.length + pendingEmp.length;
         return (
-          <div className="space-y-4">
+          <div className="space-y-5">
             {total === 0 ? (
-              <div className="py-16 text-center text-slate-400">No pending approvals 🎉</div>
+              <div className="rounded-2xl border border-slate-200/70 dark:border-white/10 bg-white/80 dark:bg-slate-900/60 backdrop-blur-xl py-16 text-center shadow-lg">
+                <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
+                  <CheckCircle2 className="h-6 w-6 text-emerald-500" />
+                </div>
+                <p className="text-slate-400 font-medium">All caught up — no pending approvals 🎉</p>
+              </div>
             ) : (
               <>
                 {/* Employee (office staff) pending */}
                 {pendingEmp.length > 0 && (
-                  <div>
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-1">
-                      👔 Employee Expenses ({pendingEmp.length})
+                  <div className="space-y-2.5">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-400" /> Employee Expenses ({pendingEmp.length})
                     </p>
-                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                       {pendingEmp.map(exp => (
-                        <div key={exp.id} className="p-4 flex items-start gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center text-lg shrink-0">
-                            {CAT_ICONS[exp.category] || '📋'}
+                        <div key={exp.id} className="relative overflow-hidden rounded-2xl border border-slate-200/70 dark:border-white/10 bg-white/85 dark:bg-slate-900/60 backdrop-blur-xl p-3 pl-4 flex items-start gap-2.5 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
+                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-400" />
+                          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 shadow-sm">
+                            {(empMap[exp.user_id] || '—').slice(0, 2).toUpperCase()}
                           </div>
-                          <div className="flex-1 min-w-0 space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-semibold text-sm text-slate-900 dark:text-white">
+                          <div className="flex-1 min-w-0 space-y-0.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-xs text-slate-900 dark:text-white">
                                 {empMap[exp.user_id] || '—'}
                               </span>
-                              <span className="text-xs text-slate-400">·</span>
-                              <span className="text-xs text-slate-600 dark:text-slate-300">
+                              <span className="text-[11px] text-slate-500 dark:text-slate-300">
                                 {CAT_LABELS[exp.category] || exp.custom_category || exp.category}
                               </span>
-                              <StatusBadge s={exp.status} />
+                              <span className="text-[11px] text-slate-400 ml-auto whitespace-nowrap">{exp.expense_date}</span>
                             </div>
-                            <p className="text-xs text-slate-500 dark:text-slate-400">{exp.description}</p>
-                            <div className="flex gap-3 text-xs">
-                              <span className="text-slate-400">{exp.expense_date}</span>
-                              <span className="text-orange-600 font-bold">₹{exp.amount}</span>
+                            <div className="flex items-center gap-2 text-[11px]">
+                              <span className="text-slate-500 dark:text-slate-400 truncate">{exp.description}</span>
+                              <span className="text-rose-500 font-bold whitespace-nowrap ml-auto">-₹{exp.amount}</span>
                             </div>
                           </div>
-                          <div className="flex gap-1 shrink-0">
-                            <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700"
+                          <div className="flex gap-0.5 shrink-0">
+                            <Button size="sm" className="h-6 text-[11px] px-1.5 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 shadow-md shadow-emerald-500/25 border-0"
                               onClick={() => handleApprove(exp.id, 'employee_expenses')}>✅</Button>
-                            <Button size="sm" variant="outline" className="h-7 text-xs text-red-500 border-red-200"
+                            <Button size="sm" variant="outline" className="h-6 text-[11px] px-1.5 text-rose-500 border-rose-200"
                               onClick={() => { setRejectTarget({ ...exp, sourceTable: 'employee_expenses' }); setRejectComment(''); }}>❌</Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400"
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-rose-400"
                               onClick={() => setDeleteTarget({ id: exp.id, table: 'employee_expenses', name: `${empMap[exp.user_id] || 'Employee'} expense` })}>
-                              <Trash2 className="h-3.5 w-3.5" />
+                              <Trash2 className="h-3 w-3" />
                             </Button>
                           </div>
                         </div>
@@ -1174,11 +1279,11 @@ const ExpensesPage: React.FC = () => {
 
                 {/* Field Boy pending */}
                 {pendingField.length > 0 && (
-                  <div>
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-1">
-                      🚗 Field Boy Expenses ({pendingField.length})
+                  <div className="space-y-2.5">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-400" /> Field Boy Expenses ({pendingField.length})
                     </p>
-                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                       {pendingField.map(exp => (
                         <FieldRow key={exp.id} exp={exp} />
                       ))}
@@ -1239,12 +1344,12 @@ const ExpensesPage: React.FC = () => {
             </div>
           )}
 
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
-            {filteredField.length === 0
-              ? <div className="py-12 text-center text-slate-400">No expenses found</div>
-              : filteredField.map(exp => <FieldRow key={exp.id} exp={exp} />)
-            }
-          </div>
+          {filteredField.length === 0
+            ? <div className="rounded-2xl border border-slate-200/70 dark:border-white/10 bg-white/80 dark:bg-slate-900/60 backdrop-blur-xl py-12 text-center text-slate-400 shadow-lg">No expenses found</div>
+            : <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                {filteredField.map(exp => <FieldRow key={exp.id} exp={exp} />)}
+              </div>
+          }
         </div>
       )}
 
@@ -1253,22 +1358,42 @@ const ExpensesPage: React.FC = () => {
         <div className="space-y-5">
 
           {/* Admin-added Office Expenses */}
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">🏢 Office Expenses ({officeExp.length})</p>
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Office Expenses ({filteredOffice.length}{filteredOffice.length !== officeExp.length ? ` / ${officeExp.length}` : ''})</p>
               <Button size="sm" onClick={() => { setEditOfficeId(null); setOfficeForm(EMPTY_OFFICE_FORM); setIsOfficeOpen(true); }}>
                 <Plus className="h-4 w-4 mr-1" />Add
               </Button>
             </div>
 
+            {/* Filter bar — same pattern as Field Expenses */}
+            <div className="flex gap-2 flex-wrap items-center">
+              <div className="relative flex-1 min-w-[160px] max-w-xs">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <input
+                  value={officeSearch}
+                  onChange={e => setOfficeSearch(e.target.value)}
+                  placeholder="Search category, name, description…"
+                  className="w-full pl-8 pr-2 h-8 text-xs border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <Input type="date" value={officeDateFrom} onChange={e => setOfficeDateFrom(e.target.value)} className="h-8 w-36 text-xs" />
+              <span className="text-xs text-slate-400">to</span>
+              <Input type="date" value={officeDateTo} onChange={e => setOfficeDateTo(e.target.value)} className="h-8 w-36 text-xs" />
+              {(officeSearch || officeDateFrom || officeDateTo) && (
+                <Button size="sm" variant="ghost" className="h-8 text-xs text-slate-400"
+                  onClick={() => { setOfficeSearch(''); setOfficeDateFrom(''); setOfficeDateTo(''); }}>Clear</Button>
+              )}
+            </div>
+
             {/* Bulk select bar */}
-            {officeExp.length > 0 && (
+            {filteredOffice.length > 0 && (
               <div className="flex items-center gap-3 px-1">
                 <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
                   <input
                     type="checkbox"
-                    checked={selectedOfficeIds.size > 0 && selectedOfficeIds.size === officeExp.length}
-                    onChange={() => selectedOfficeIds.size === officeExp.length ? clearOfficeSelection() : selectAllOffice(officeExp.map(e => e.id))}
+                    checked={selectedOfficeIds.size > 0 && selectedOfficeIds.size === filteredOffice.length}
+                    onChange={() => selectedOfficeIds.size === filteredOffice.length ? clearOfficeSelection() : selectAllOffice(filteredOffice.map(e => e.id))}
                     className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                   />
                   Select all
@@ -1285,107 +1410,106 @@ const ExpensesPage: React.FC = () => {
               </div>
             )}
 
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
-              {officeExp.length === 0
-                ? <div className="py-8 text-center text-slate-400 text-sm">No office expenses yet</div>
-                : officeExp.map(exp => (
-                  <div key={exp.id} className="px-3 py-2.5 flex items-center gap-2.5">
-                    <input
-                      type="checkbox"
-                      checked={selectedOfficeIds.has(exp.id)}
-                      onChange={() => toggleOfficeSelect(exp.id)}
-                      className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
-                    />
-                    <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-sm shrink-0">
-                      📋
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-semibold text-xs text-slate-800 dark:text-slate-100">{exp.category || exp.custom_category}</span>
-                        {exp.spent_by_name && (
-                          <span className="text-[10px] bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded font-semibold">
-                            👤 {exp.spent_by_name}
-                          </span>
-                        )}
-                        <span className="text-red-600 font-bold text-xs ml-auto">−₹{exp.amount}</span>
+            {filteredOffice.length === 0
+              ? <div className="rounded-2xl border border-slate-200/70 dark:border-white/10 bg-white/80 dark:bg-slate-900/60 backdrop-blur-xl py-8 text-center text-slate-400 text-sm shadow-lg">{officeExp.length === 0 ? 'No office expenses yet' : 'No entries match your filter'}</div>
+              : <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {filteredOffice.map(exp => (
+                    <div key={exp.id} className="relative overflow-hidden rounded-2xl border border-slate-200/70 dark:border-white/10 bg-white/85 dark:bg-slate-900/60 backdrop-blur-xl p-3 pl-4 flex items-center gap-2.5 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
+                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-indigo-500 to-cyan-500" />
+                      <input
+                        type="checkbox"
+                        checked={selectedOfficeIds.has(exp.id)}
+                        onChange={() => toggleOfficeSelect(exp.id)}
+                        className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-semibold text-xs text-slate-800 dark:text-slate-100">{exp.category || exp.custom_category}</span>
+                          {exp.spent_by_name && (
+                            <span className="text-[10px] bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full font-semibold">
+                              {exp.spent_by_name}
+                            </span>
+                          )}
+                          <span className="text-[11px] text-slate-400 whitespace-nowrap">{exp.expense_date}</span>
+                          <span className="text-rose-500 font-bold text-xs ml-auto whitespace-nowrap">-₹{exp.amount}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          {exp.description}{exp.remarks ? ` · ${exp.remarks}` : ''}
+                        </p>
                       </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5 truncate">
-                        {exp.description}{exp.remarks ? ` · ${exp.remarks}` : ''} · {exp.expense_date}
-                      </p>
+                      <div className="flex gap-0.5 shrink-0">
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => {
+                          setEditOfficeId(exp.id);
+                          setOfficeForm({
+                            category: exp.category || '',
+                            custom_category: exp.custom_category || '',
+                            spent_by_name: exp.spent_by_name || '',
+                            amount: String(exp.amount),
+                            description: exp.description,
+                            remarks: exp.remarks || '',
+                            expense_date: exp.expense_date,
+                          });
+                          setIsOfficeOpen(true);
+                        }}>
+                          <Edit className="h-3 w-3 text-slate-500" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-rose-400"
+                          onClick={() => setDeleteTarget({ id: exp.id, table: 'office_expenses', name: 'office expense' })}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex gap-0.5 shrink-0">
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => {
-                        setEditOfficeId(exp.id);
-                        setOfficeForm({
-                          category: exp.category || '',
-                          custom_category: exp.custom_category || '',
-                          spent_by_name: exp.spent_by_name || '',
-                          amount: String(exp.amount),
-                          description: exp.description,
-                          remarks: exp.remarks || '',
-                          expense_date: exp.expense_date,
-                        });
-                        setIsOfficeOpen(true);
-                      }}>
-                        <Edit className="h-3 w-3 text-slate-500" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400"
-                        onClick={() => setDeleteTarget({ id: exp.id, table: 'office_expenses', name: 'office expense' })}>
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                ))
-              }
-            </div>
+                  ))}
+                </div>
+            }
           </div>
 
           {/* Employee submitted expenses — all statuses */}
-          <div className="space-y-3">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">👔 Employee Submitted Expenses</p>
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
-              {empExp.length === 0
-                ? <div className="py-8 text-center text-slate-400 text-sm">No employee expenses yet</div>
-                : empExp.map(exp => (
-                  <div key={exp.id} className="px-3 py-2.5 flex items-start gap-2.5">
-                    <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center text-sm shrink-0">
-                      {CAT_ICONS[exp.category] || '📋'}
-                    </div>
-                    <div className="flex-1 min-w-0 space-y-0.5">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-semibold text-xs text-slate-900 dark:text-white">{empMap[exp.user_id] || '—'}</span>
-                        <span className="text-[11px] text-slate-500">{CAT_LABELS[exp.category] || exp.custom_category || exp.category}</span>
-                        <StatusBadge s={exp.status} />
+          <div className="space-y-2.5">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Employee Submitted Expenses ({empExp.length})</p>
+            {empExp.length === 0
+              ? <div className="rounded-2xl border border-slate-200/70 dark:border-white/10 bg-white/80 dark:bg-slate-900/60 backdrop-blur-xl py-8 text-center text-slate-400 text-sm shadow-lg">No employee expenses yet</div>
+              : <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {empExp.map(exp => {
+                    const accent = exp.status === 'approved' ? 'bg-emerald-500' : exp.status === 'rejected' ? 'bg-rose-500' : 'bg-amber-400';
+                    return (
+                    <div key={exp.id} className="relative overflow-hidden rounded-2xl border border-slate-200/70 dark:border-white/10 bg-white/85 dark:bg-slate-900/60 backdrop-blur-xl p-3 pl-4 flex items-start gap-2.5 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
+                      <div className={`absolute left-0 top-0 bottom-0 w-1 ${accent}`} />
+                      <div className="flex-1 min-w-0 space-y-0.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-semibold text-xs text-slate-900 dark:text-white">{empMap[exp.user_id] || '—'}</span>
+                          <span className="text-[11px] text-slate-500">{CAT_LABELS[exp.category] || exp.custom_category || exp.category}</span>
+                          <StatusBadge s={exp.status} />
+                          <span className="text-[11px] text-slate-400 ml-auto whitespace-nowrap">{exp.expense_date}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px]">
+                          <span className="text-slate-500 dark:text-slate-400 truncate">{exp.description}</span>
+                          <span className="text-rose-500 font-bold whitespace-nowrap ml-auto">-₹{exp.amount}</span>
+                        </div>
+                        {exp.admin_comment && (
+                          <p className="text-[11px] text-rose-500 bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/20 rounded-lg px-1.5 py-1 mt-1">
+                            💬 {exp.admin_comment}
+                          </p>
+                        )}
                       </div>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">{exp.description}</p>
-                      <div className="flex gap-2.5 text-[11px]">
-                        <span className="text-slate-400">{exp.expense_date}</span>
-                        <span className="text-red-600 font-bold">−₹{exp.amount}</span>
+                      <div className="flex gap-0.5 shrink-0">
+                        {exp.status === 'pending' && (
+                          <>
+                            <Button size="sm" className="h-6 text-[11px] px-1.5 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 shadow-md shadow-emerald-500/25 border-0"
+                              onClick={() => handleApprove(exp.id, 'employee_expenses')}>✅</Button>
+                            <Button size="sm" variant="outline" className="h-6 text-[11px] px-1.5 text-rose-500 border-rose-200"
+                              onClick={() => { setRejectTarget({ ...exp, sourceTable: 'employee_expenses' }); setRejectComment(''); }}>❌</Button>
+                          </>
+                        )}
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-rose-400"
+                          onClick={() => setDeleteTarget({ id: exp.id, table: 'employee_expenses', name: `${empMap[exp.user_id] || 'Employee'} expense` })}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
                       </div>
-                      {exp.admin_comment && (
-                        <p className="text-[11px] text-red-600 bg-red-50 dark:bg-red-950/30 border border-red-200 rounded px-1.5 py-1 mt-1">
-                          💬 {exp.admin_comment}
-                        </p>
-                      )}
                     </div>
-                    <div className="flex gap-0.5 shrink-0">
-                      {exp.status === 'pending' && (
-                        <>
-                          <Button size="sm" className="h-6 text-[11px] px-1.5 bg-green-600 hover:bg-green-700"
-                            onClick={() => handleApprove(exp.id, 'employee_expenses')}>✅</Button>
-                          <Button size="sm" variant="outline" className="h-6 text-[11px] px-1.5 text-red-500 border-red-200"
-                            onClick={() => { setRejectTarget({ ...exp, sourceTable: 'employee_expenses' }); setRejectComment(''); }}>❌</Button>
-                        </>
-                      )}
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400"
-                        onClick={() => setDeleteTarget({ id: exp.id, table: 'employee_expenses', name: `${empMap[exp.user_id] || 'Employee'} expense` })}>
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                ))
-              }
-            </div>
+                  );})}
+                </div>
+            }
           </div>
         </div>
       )}
@@ -1393,8 +1517,10 @@ const ExpensesPage: React.FC = () => {
       {/* ── CREDITS ── */}
       {!loading && tab === 'Credits' && (
         <div className="space-y-4">
-          <div className="flex gap-3 p-3.5 rounded-xl border border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-900 text-xs text-green-800 dark:text-green-300">
-            <IndianRupee className="h-4 w-4 shrink-0 mt-0.5 text-green-500" />
+          <div className="relative overflow-hidden flex gap-3 p-3.5 rounded-2xl border border-emerald-200/70 dark:border-emerald-500/20 bg-gradient-to-br from-emerald-50/90 to-white/60 dark:from-emerald-500/10 dark:to-slate-900/60 backdrop-blur-xl text-xs text-emerald-800 dark:text-emerald-300 shadow-lg shadow-emerald-200/20 dark:shadow-black/30">
+            <div className="h-8 w-8 rounded-xl bg-emerald-500/15 flex items-center justify-center shrink-0">
+              <IndianRupee className="h-4 w-4 text-emerald-500" />
+            </div>
             <div>
               <p className="font-bold text-sm mb-0.5">Admin Credits — Incoming Money</p>
               <p>Record all money received by the company — charges collected, incentives, security deposits, payouts, etc. These are always shown as positive (+) and contribute to profit.</p>
@@ -1409,60 +1535,62 @@ const ExpensesPage: React.FC = () => {
                 const allTotal   = adminCredits.reduce((s,c) => s + (Number(c.amount)||0), 0);
                 return (
                   <div className="flex gap-3 mt-0.5">
-                    <span className="text-[11px] text-green-600 font-bold">This month: +₹{monthTotal.toFixed(0)}</span>
+                    <span className="text-[11px] text-emerald-500 font-bold">This month: +₹{monthTotal.toFixed(0)}</span>
                     <span className="text-[11px] text-slate-400">All time: +₹{allTotal.toFixed(0)}</span>
                   </div>
                 );
               })()}
             </div>
-            <Button size="sm" onClick={() => { setEditCreditId(null); setCreditForm(EMPTY_CREDIT_FORM); setIsCreditOpen(true); }}>
+            <Button size="sm" onClick={() => { setEditCreditId(null); setCreditForm(EMPTY_CREDIT_FORM); setIsCreditOpen(true); }}
+              className="bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 shadow-md shadow-emerald-500/25 border-0">
               <Plus className="h-4 w-4 mr-1" />Add Credit
             </Button>
           </div>
 
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 shadow-sm">
-            {adminCredits.length === 0
-              ? <div className="py-10 text-center text-slate-400 text-sm">No credits added yet. Click "Add Credit" to record incoming money.</div>
-              : adminCredits.map(cr => (
-                <div key={cr.id} className="px-3 py-2.5 flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-lg bg-green-50 dark:bg-green-950/30 flex items-center justify-center text-sm shrink-0">
-                    {(CREDIT_CAT_LABELS[cr.category] || '➕').split(' ')[0]}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="font-semibold text-xs text-slate-800 dark:text-slate-100">
-                        {(CREDIT_CAT_LABELS[cr.category] || cr.custom_category || cr.category || '').replace(/^[^\s]+\s/, '')}
-                      </span>
-                      <span className="text-green-600 font-bold text-xs ml-auto">+₹{cr.amount}</span>
+          {adminCredits.length === 0
+            ? <div className="rounded-2xl border border-slate-200/70 dark:border-white/10 bg-white/80 dark:bg-slate-900/60 backdrop-blur-xl py-10 text-center text-slate-400 text-sm shadow-lg">No credits added yet. Click "Add Credit" to record incoming money.</div>
+            : <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                {adminCredits.map(cr => (
+                  <div key={cr.id} className="relative overflow-hidden rounded-2xl border border-slate-200/70 dark:border-white/10 bg-white/85 dark:bg-slate-900/60 backdrop-blur-xl p-3 pl-4 flex items-center gap-2.5 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
+                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-emerald-500" />
+                    <div className="w-8 h-8 rounded-xl bg-emerald-500/10 flex items-center justify-center text-sm shrink-0">
+                      {(CREDIT_CAT_LABELS[cr.category] || '➕').split(' ')[0]}
                     </div>
-                    <p className="text-[11px] text-slate-500 mt-0.5 truncate">
-                      {cr.description}{cr.reference ? ` · Ref: ${cr.reference}` : ''} · {cr.credit_date}
-                    </p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-xs text-slate-800 dark:text-slate-100">
+                          {(CREDIT_CAT_LABELS[cr.category] || cr.custom_category || cr.category || '').replace(/^[^\s]+\s/, '')}
+                        </span>
+                        <span className="text-emerald-500 font-bold text-xs ml-auto">+₹{cr.amount}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+                        {cr.description}{cr.reference ? ` · Ref: ${cr.reference}` : ''} · {cr.credit_date}
+                      </p>
+                    </div>
+                    <div className="flex gap-0.5 shrink-0">
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => {
+                        setEditCreditId(cr.id);
+                        setCreditForm({
+                          category: cr.category,
+                          custom_category: cr.custom_category || '',
+                          amount: String(cr.amount),
+                          description: cr.description,
+                          credit_date: cr.credit_date,
+                          reference: cr.reference || '',
+                        });
+                        setIsCreditOpen(true);
+                      }}>
+                        <Edit className="h-3 w-3 text-slate-500" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-rose-400"
+                        onClick={() => setDeleteTarget({ id: cr.id, table: 'admin_credits', name: 'credit entry' })}>
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex gap-0.5 shrink-0">
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => {
-                      setEditCreditId(cr.id);
-                      setCreditForm({
-                        category: cr.category,
-                        custom_category: cr.custom_category || '',
-                        amount: String(cr.amount),
-                        description: cr.description,
-                        credit_date: cr.credit_date,
-                        reference: cr.reference || '',
-                      });
-                      setIsCreditOpen(true);
-                    }}>
-                      <Edit className="h-3 w-3 text-slate-500" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400"
-                      onClick={() => setDeleteTarget({ id: cr.id, table: 'admin_credits', name: 'credit entry' })}>
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </div>
-              ))
-            }
-          </div>
+                ))}
+              </div>
+          }
         </div>
       )}
 
@@ -1471,10 +1599,10 @@ const ExpensesPage: React.FC = () => {
         <div className="space-y-5">
 
           {/* Sub-tab switcher */}
-          <div className="flex gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl w-fit">
+          <div className="flex gap-1 p-1 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-slate-200/70 dark:border-white/10 rounded-xl w-fit shadow-md shadow-slate-200/30 dark:shadow-black/20">
             {(['office', 'field'] as const).map(key => (
               <button key={key} onClick={() => setBulkSubTab(key)}
-                className={cn('px-4 py-2 rounded-lg text-sm font-semibold transition-all', bulkSubTab === key ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300')}>
+                className={cn('px-4 py-2 rounded-lg text-sm font-semibold transition-all', bulkSubTab === key ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-md shadow-indigo-500/30' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100/70 dark:hover:bg-white/5')}>
                 {key === 'office' ? '🏢 Office Expenses' : '🚗 Field Expenses'}
               </button>
             ))}
@@ -1483,66 +1611,43 @@ const ExpensesPage: React.FC = () => {
           {/* ── OFFICE BULK ── */}
           {bulkSubTab === 'office' && <>
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs text-slate-500">Bulk upload office expenses from an Excel file.</p>
-            <Button size="sm" variant="outline" className="h-7 text-xs shrink-0"
-              onClick={() => setShowOfficeBulkInfo(v => !v)}>
-              <Info className="h-3.5 w-3.5 mr-1" />
-              {showOfficeBulkInfo ? 'Hide Instructions' : 'Show Instructions'}
-              {showOfficeBulkInfo ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Bulk Upload — Office Expenses</p>
+            <Button size="sm" variant="ghost" className="h-7 text-xs text-blue-600" onClick={() => setShowBulkHelp(v => !v)}>
+              {showBulkHelp ? 'Hide instructions' : 'How does this work?'}
             </Button>
           </div>
 
-          {showOfficeBulkInfo && (
-            <div className="flex gap-3 p-4 rounded-xl border border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-900 text-xs text-blue-800 dark:text-blue-300">
-              <FileUp className="h-5 w-5 shrink-0 mt-0.5 text-blue-500" />
-              <div>
-                <p className="font-bold text-sm mb-1">Bulk Upload Office Expenses</p>
-                <ol className="list-decimal ml-4 space-y-0.5">
-                  <li>Download the sample Excel template</li>
-                  <li>Fill your expense rows (keep column names exactly as-is)</li>
-                  <li>Upload — rows validated before saving</li>
-                  <li>Review preview, then click Upload to Supabase</li>
-                </ol>
-              </div>
+          {showBulkHelp && (
+            <div className="flex gap-3 p-3.5 rounded-xl border border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-900 text-xs text-blue-800 dark:text-blue-300">
+              <FileUp className="h-4 w-4 shrink-0 mt-0.5 text-blue-500" />
+              <ol className="list-decimal ml-4 space-y-0.5">
+                <li>Download the sample Excel template</li>
+                <li>Fill your expense rows (keep column names exactly as-is)</li>
+                <li>Upload — rows validated before saving</li>
+                <li>Review preview, then click Upload to Supabase</li>
+              </ol>
             </div>
           )}
 
           {/* Step 1 — Download sample */}
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 space-y-3">
+          <div className="bg-white/90 dark:bg-slate-900/70 backdrop-blur-xl border border-slate-200/70 dark:border-white/10 rounded-2xl ring-1 ring-black/[0.03] dark:ring-white/5 shadow-lg shadow-slate-200/40 dark:shadow-black/40 p-4 space-y-2.5">
             <div className="flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">1</span>
+              <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">1</span>
               <p className="font-semibold text-slate-800 dark:text-white text-sm">Download Sample Template</p>
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 ml-8">
+            <p className="text-xs text-slate-500 dark:text-slate-400 ml-7">
               Columns: <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Date</code> <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Category</code> <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Spent By Name</code> <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Description</code> <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Remarks</code> <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">Amount</code>
+              {' '}— Category &amp; Spent By are free text.
             </p>
-            <p className="text-xs text-slate-400 ml-8">Category &amp; Spent By Name are free text — type anything, no fixed list.</p>
-            <div className="ml-8">
-              <div className="flex flex-wrap gap-1 mb-3">
-                {(showAllOfficeCats ? COMMON_OFFICE_CATS : COMMON_OFFICE_CATS.slice(0, 4)).map(c => (
-                  <span key={c} className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded text-[10px]">{c}</span>
-                ))}
-                {!showAllOfficeCats && (
-                  <button onClick={() => setShowAllOfficeCats(true)}
-                    className="px-2 py-0.5 text-[10px] text-blue-600 hover:underline">
-                    +{COMMON_OFFICE_CATS.length - 4} more
-                  </button>
-                )}
-                {showAllOfficeCats && (
-                  <button onClick={() => setShowAllOfficeCats(false)}
-                    className="px-2 py-0.5 text-[10px] text-blue-600 hover:underline">
-                    Show less
-                  </button>
-                )}
-              </div>
-              <Button size="sm" onClick={handleSampleDownload} className="bg-blue-600 hover:bg-blue-700">
+            <div className="ml-7">
+              <Button size="sm" onClick={handleSampleDownload} className="bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 shadow-md shadow-indigo-500/25 border-0">
                 <Download className="h-4 w-4 mr-1.5" />Download Sample Excel
               </Button>
             </div>
           </div>
 
           {/* Step 2 — Upload file */}
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 space-y-3">
+          <div className="bg-white/90 dark:bg-slate-900/70 backdrop-blur-xl border border-slate-200/70 dark:border-white/10 rounded-2xl ring-1 ring-black/[0.03] dark:ring-white/5 shadow-lg shadow-slate-200/40 dark:shadow-black/40 p-5 space-y-3">
             <div className="flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">2</span>
               <p className="font-semibold text-slate-800 dark:text-white text-sm">Upload Filled Excel</p>
@@ -1591,16 +1696,16 @@ const ExpensesPage: React.FC = () => {
 
           {/* Preview table */}
           {bulkRows.length > 0 && (
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm">
+            <div className="bg-white/90 dark:bg-slate-900/70 backdrop-blur-xl border border-slate-200/70 dark:border-white/10 rounded-2xl ring-1 ring-black/[0.03] dark:ring-white/5 shadow-lg shadow-slate-200/40 dark:shadow-black/40 overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
                 <div>
                   <p className="text-sm font-bold text-slate-800 dark:text-white">Preview — {bulkRows.length} rows ready to upload</p>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Total: −₹{bulkRows.reduce((s, r) => s + r.amount, 0).toLocaleString('en-IN')}
+                    Total: -₹{bulkRows.reduce((s, r) => s + r.amount, 0).toLocaleString('en-IN')}
                   </p>
                 </div>
                 <Button
-                  className="bg-green-600 hover:bg-green-700 text-white"
+                  className="bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 shadow-md shadow-emerald-500/25 border-0 text-white"
                   onClick={handleBulkUpload}
                   disabled={bulkUploading || bulkDone}
                 >
@@ -1633,7 +1738,7 @@ const ExpensesPage: React.FC = () => {
                         </td>
                         <td className="px-3 py-2 text-slate-500 dark:text-slate-400 max-w-[180px] truncate">{r.description}</td>
                         <td className="px-3 py-2 text-slate-400 max-w-[140px] truncate">{r.remarks || '—'}</td>
-                        <td className="px-3 py-2 font-bold text-red-600 whitespace-nowrap">−₹{Number(r.amount).toLocaleString('en-IN')}</td>
+                        <td className="px-3 py-2 font-bold text-red-600 whitespace-nowrap">-₹{Number(r.amount).toLocaleString('en-IN')}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1641,7 +1746,7 @@ const ExpensesPage: React.FC = () => {
                     <tr>
                       <td colSpan={6} className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-300">TOTAL ({bulkRows.length} rows)</td>
                       <td className="px-3 py-2 font-black text-red-600 text-sm">
-                        −₹{bulkRows.reduce((s, r) => s + r.amount, 0).toLocaleString('en-IN')}
+                        -₹{bulkRows.reduce((s, r) => s + r.amount, 0).toLocaleString('en-IN')}
                       </td>
                     </tr>
                   </tfoot>
@@ -1666,44 +1771,38 @@ const ExpensesPage: React.FC = () => {
           {/* ── FIELD BULK ── */}
           {bulkSubTab === 'field' && <>
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs text-slate-500">Bulk upload field expenses from an Excel file.</p>
-            <Button size="sm" variant="outline" className="h-7 text-xs shrink-0"
-              onClick={() => setShowFieldBulkInfo(v => !v)}>
-              <Info className="h-3.5 w-3.5 mr-1" />
-              {showFieldBulkInfo ? 'Hide Instructions' : 'Show Instructions'}
-              {showFieldBulkInfo ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Bulk Upload — Field Expenses</p>
+            <Button size="sm" variant="ghost" className="h-7 text-xs text-violet-600" onClick={() => setShowBulkHelp(v => !v)}>
+              {showBulkHelp ? 'Hide instructions' : 'How does this work?'}
             </Button>
           </div>
 
-          {showFieldBulkInfo && (
-            <div className="flex gap-3 p-4 rounded-xl border border-violet-200 bg-violet-50 dark:bg-violet-950/20 dark:border-violet-900 text-xs text-violet-800 dark:text-violet-300">
-              <FileUp className="h-5 w-5 shrink-0 mt-0.5 text-violet-500" />
-              <div>
-                <p className="font-bold text-sm mb-1">Bulk Upload Field Expenses</p>
-                <ol className="list-decimal ml-4 space-y-0.5">
-                  <li>Download template — includes your registered employees list</li>
-                  <li>Fill Date, Employee Name, KM, Conveyance, Credit, Description</li>
-                  <li>Upload — employee name matched to ID automatically</li>
-                  <li>Entries saved as <strong>Approved</strong> directly (admin override)</li>
-                </ol>
-              </div>
+          {showBulkHelp && (
+            <div className="flex gap-3 p-3.5 rounded-xl border border-violet-200 bg-violet-50 dark:bg-violet-950/20 dark:border-violet-900 text-xs text-violet-800 dark:text-violet-300">
+              <FileUp className="h-4 w-4 shrink-0 mt-0.5 text-violet-500" />
+              <ol className="list-decimal ml-4 space-y-0.5">
+                <li>Download template — includes your registered employees list</li>
+                <li>Fill Date, Employee Name, KM, Conveyance, Credit, Description</li>
+                <li>Upload — employee name matched to ID automatically</li>
+                <li>Entries saved as <strong>Approved</strong> directly (admin override)</li>
+              </ol>
             </div>
           )}
 
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 space-y-3">
+          <div className="bg-white/90 dark:bg-slate-900/70 backdrop-blur-xl border border-slate-200/70 dark:border-white/10 rounded-2xl ring-1 ring-black/[0.03] dark:ring-white/5 shadow-lg shadow-slate-200/40 dark:shadow-black/40 p-4 space-y-2.5">
             <div className="flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-violet-600 text-white text-xs font-bold flex items-center justify-center">1</span>
+              <span className="w-5 h-5 rounded-full bg-violet-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">1</span>
               <p className="font-semibold text-slate-800 dark:text-white text-sm">Download Field Template</p>
             </div>
-            <div className="ml-8 space-y-2">
-              <p className="text-xs text-slate-500 dark:text-slate-400">6 columns: Date, Employee Name, KM, Conveyance Rs, Credit Rs, Description</p>
-              <Button size="sm" onClick={handleFieldSampleDownload} className="bg-violet-600 hover:bg-violet-700 text-white mt-1">
+            <div className="ml-7 space-y-2">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Columns: Date, Employee Name, KM, Conveyance Rs, Credit Rs, Description</p>
+              <Button size="sm" onClick={handleFieldSampleDownload} className="bg-violet-600 hover:bg-violet-700 text-white">
                 <Download className="h-4 w-4 mr-1.5" />Download Field Template
               </Button>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 space-y-3">
+          <div className="bg-white/90 dark:bg-slate-900/70 backdrop-blur-xl border border-slate-200/70 dark:border-white/10 rounded-2xl ring-1 ring-black/[0.03] dark:ring-white/5 shadow-lg shadow-slate-200/40 dark:shadow-black/40 p-5 space-y-3">
             <div className="flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-violet-600 text-white text-xs font-bold flex items-center justify-center">2</span>
               <p className="font-semibold text-slate-800 dark:text-white text-sm">Upload Filled Excel</p>
@@ -1739,15 +1838,15 @@ const ExpensesPage: React.FC = () => {
           )}
 
           {fieldBulkRows.length > 0 && (
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm">
+            <div className="bg-white/90 dark:bg-slate-900/70 backdrop-blur-xl border border-slate-200/70 dark:border-white/10 rounded-2xl ring-1 ring-black/[0.03] dark:ring-white/5 shadow-lg shadow-slate-200/40 dark:shadow-black/40 overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex-wrap gap-2">
                 <div>
                   <p className="text-sm font-bold text-slate-800 dark:text-white">{fieldBulkRows.length} field entries ready</p>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Expense: −₹{fieldBulkRows.reduce((s,r) => s+r.conveyance_amount,0).toLocaleString("en-IN")} · Credit: +₹{fieldBulkRows.reduce((s,r) => s+r.credit_total,0).toLocaleString("en-IN")}
+                    Expense: -₹{fieldBulkRows.reduce((s,r) => s+r.conveyance_amount,0).toLocaleString("en-IN")} · Credit: +₹{fieldBulkRows.reduce((s,r) => s+r.credit_total,0).toLocaleString("en-IN")}
                   </p>
                 </div>
-                <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={handleFieldBulkUpload} disabled={fieldBulkUploading || fieldBulkDone}>
+                <Button className="bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 shadow-md shadow-emerald-500/25 border-0 text-white" onClick={handleFieldBulkUpload} disabled={fieldBulkUploading || fieldBulkDone}>
                   {fieldBulkUploading ? <><span className="animate-spin mr-1.5">⏳</span>Uploading…</> : fieldBulkDone ? <><CheckCircle2 className="h-4 w-4 mr-1.5" />Uploaded!</> : <><Upload className="h-4 w-4 mr-1.5" />Upload {fieldBulkRows.length} entries</>}
                 </Button>
               </div>
@@ -1763,7 +1862,7 @@ const ExpensesPage: React.FC = () => {
                         <td className="px-3 py-2 font-medium">{r.expense_date}</td>
                         <td className="px-3 py-2 font-semibold text-slate-800 dark:text-white">{r.employee_name}</td>
                         <td className="px-3 py-2 text-blue-600">{r.kilometres > 0 ? r.kilometres : "—"}</td>
-                        <td className="px-3 py-2 font-bold text-red-600">−₹{Number(r.conveyance_amount).toLocaleString("en-IN")}</td>
+                        <td className="px-3 py-2 font-bold text-red-600">-₹{Number(r.conveyance_amount).toLocaleString("en-IN")}</td>
                         <td className="px-3 py-2 font-bold text-green-600">{r.credit_total > 0 ? "+₹"+Number(r.credit_total).toLocaleString("en-IN") : "—"}</td>
                         <td className="px-3 py-2 text-slate-500 max-w-[220px] truncate">{r.description || "—"}</td>
                       </tr>
@@ -1772,7 +1871,7 @@ const ExpensesPage: React.FC = () => {
                   <tfoot className="bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700">
                     <tr>
                       <td colSpan={4} className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-300">TOTAL ({fieldBulkRows.length} rows)</td>
-                      <td className="px-3 py-2 font-black text-red-600">−₹{fieldBulkRows.reduce((s,r) => s+r.conveyance_amount,0).toLocaleString("en-IN")}</td>
+                      <td className="px-3 py-2 font-black text-red-600">-₹{fieldBulkRows.reduce((s,r) => s+r.conveyance_amount,0).toLocaleString("en-IN")}</td>
                       <td className="px-3 py-2 font-black text-green-600">+₹{fieldBulkRows.reduce((s,r) => s+r.credit_total,0).toLocaleString("en-IN")}</td>
                       <td></td>
                     </tr>
@@ -1853,10 +1952,10 @@ const ExpensesPage: React.FC = () => {
                 </div>
                 {(ledgerSourceFilter !== 'all' || ledgerSearch) && (
                   <div className="flex gap-3 flex-wrap text-xs px-1 py-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                    <span className="text-red-600 font-bold">Expense: −₹{Math.abs(flExp).toFixed(0)}</span>
+                    <span className="text-red-600 font-bold">Expense: -₹{Math.abs(flExp).toFixed(0)}</span>
                     <span className="text-green-600 font-bold">Credit: +₹{flCredit.toFixed(0)}</span>
                     <span className={`font-black ${flNet >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      Net: {flNet >= 0 ? '+' : '−'}₹{Math.abs(flNet).toFixed(0)}
+                      Net: {flNet >= 0 ? '+' : '-'}₹{Math.abs(flNet).toFixed(0)}
                     </span>
                   </div>
                 )}
@@ -1864,43 +1963,40 @@ const ExpensesPage: React.FC = () => {
             );
           })()}
 
-          {/* Spend by Person — collapsed by default, split into Field / Office columns */}
+          {/* Spend by Person — collapsible, 2-column (Field left, Office right) */}
           {spendByPerson.length > 0 && (
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">👤 Total Spent — By Person</p>
-                <Button size="sm" variant="outline" className="h-7 text-xs shrink-0"
-                  onClick={() => setShowSpendByPerson(v => !v)}>
-                  {showSpendByPerson ? <EyeOff className="h-3.5 w-3.5 mr-1" /> : <Eye className="h-3.5 w-3.5 mr-1" />}
-                  {showSpendByPerson ? 'Hide' : 'View'}
-                </Button>
-              </div>
-
+            <div className="bg-white/90 dark:bg-slate-900/70 backdrop-blur-xl border border-slate-200/70 dark:border-white/10 rounded-2xl ring-1 ring-black/[0.03] dark:ring-white/5 shadow-lg shadow-slate-200/40 dark:shadow-black/40 overflow-hidden">
+              <button
+                onClick={() => setShowSpendByPerson(v => !v)}
+                className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors"
+              >
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Spent — By Person ({spendByPerson.length})</span>
+                <span className="text-xs text-blue-600 font-semibold">{showSpendByPerson ? 'Hide' : 'Show'}</span>
+              </button>
               {showSpendByPerson && (() => {
-                const fieldPeople = spendByPerson.filter(p => p.source === 'Field');
+                const fieldPeople  = spendByPerson.filter(p => p.source === 'Field');
                 const officePeople = spendByPerson.filter(p => p.source !== 'Field');
-                const renderCol = (list: typeof spendByPerson, label: string) => (
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">{label}</p>
-                    {list.length === 0
-                      ? <p className="text-xs text-slate-300 italic px-1">No entries</p>
-                      : list.map(({ name, source, amount }) => (
-                        <div key={`${name}__${source}`} className="flex items-center gap-2 px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-700">
-                          {source !== 'Field' && (
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 ${source === 'Employee' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'}`}>
-                              {source}
-                            </span>
-                          )}
-                          <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex-1 truncate">{name}</span>
-                          <span className="text-xs font-black text-rose-500 whitespace-nowrap">−₹{amount.toFixed(0)}</span>
-                        </div>
-                      ))}
+                const hasEmployee  = officePeople.some(p => p.source === 'Employee');
+                const Row = ({ name, amount }: { name: string; amount: number; key?: any }) => (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-700">
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex-1 truncate">{name}</span>
+                    <span className="text-xs font-black text-red-500 whitespace-nowrap">-₹{amount.toFixed(0)}</span>
                   </div>
                 );
                 return (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-                    {renderCol(fieldPeople, '🚗 Field')}
-                    {renderCol(officePeople, '🏢 Office / Employee')}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 pt-0 border-t border-slate-100 dark:border-slate-700">
+                    <div className="space-y-1.5 pt-3">
+                      <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wide px-1">🚗 Field</p>
+                      {fieldPeople.length === 0
+                        ? <p className="text-xs text-slate-400 px-1">No field spending</p>
+                        : fieldPeople.map(p => <Row key={`f-${p.name}`} name={p.name} amount={p.amount} />)}
+                    </div>
+                    <div className="space-y-1.5 pt-3 sm:border-l sm:border-slate-100 dark:sm:border-slate-700 sm:pl-3">
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide px-1">🏢 {hasEmployee ? 'Office / Employee' : 'Office'}</p>
+                      {officePeople.length === 0
+                        ? <p className="text-xs text-slate-400 px-1">No office spending</p>
+                        : officePeople.map(p => <Row key={`o-${p.name}`} name={p.name} amount={p.amount} />)}
+                    </div>
                   </div>
                 );
               })()}
@@ -1915,40 +2011,40 @@ const ExpensesPage: React.FC = () => {
             const hasCredit = totCredit > 0;
             return hasCredit ? (
               <div className="grid grid-cols-3 gap-3">
-                <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-xl p-3 text-center">
-                  <p className="text-[10px] font-bold text-red-400 uppercase tracking-wider">Total Expense</p>
-                  <p className="text-lg font-black text-red-600 mt-0.5">−₹{Math.abs(totExp).toFixed(0)}</p>
+                <div className="rounded-2xl border border-rose-200/70 dark:border-rose-500/20 bg-rose-50/80 dark:bg-rose-500/10 backdrop-blur-xl p-3 text-center shadow-sm">
+                  <p className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Total Expense</p>
+                  <p className="text-lg font-black text-rose-500 mt-0.5">-₹{Math.abs(totExp).toFixed(0)}</p>
                 </div>
-                <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-xl p-3 text-center">
-                  <p className="text-[10px] font-bold text-green-400 uppercase tracking-wider">Total Credit</p>
-                  <p className="text-lg font-black text-green-600 mt-0.5">+₹{totCredit.toFixed(0)}</p>
+                <div className="rounded-2xl border border-emerald-200/70 dark:border-emerald-500/20 bg-emerald-50/80 dark:bg-emerald-500/10 backdrop-blur-xl p-3 text-center shadow-sm">
+                  <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Total Credit</p>
+                  <p className="text-lg font-black text-emerald-500 mt-0.5">+₹{totCredit.toFixed(0)}</p>
                 </div>
-                <div className={`rounded-xl p-3 text-center border ${totNet >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800' : 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800'}`}>
-                  <p className={`text-[10px] font-bold uppercase tracking-wider ${totNet >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>Net P&L</p>
-                  <p className={`text-lg font-black mt-0.5 ${totNet >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {totNet >= 0 ? '+' : '−'}₹{Math.abs(totNet).toFixed(0)}
+                <div className={`rounded-2xl p-3 text-center border backdrop-blur-xl shadow-sm ${totNet >= 0 ? 'bg-emerald-50/80 dark:bg-emerald-500/10 border-emerald-200/70 dark:border-emerald-500/20' : 'bg-rose-50/80 dark:bg-rose-500/10 border-rose-200/70 dark:border-rose-500/20'}`}>
+                  <p className={`text-[10px] font-bold uppercase tracking-wider ${totNet >= 0 ? 'text-emerald-500' : 'text-rose-400'}`}>Net P&L</p>
+                  <p className={`text-lg font-black mt-0.5 ${totNet >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                    {totNet >= 0 ? '+' : '-'}₹{Math.abs(totNet).toFixed(0)}
                   </p>
                 </div>
               </div>
             ) : (
-              <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-xl p-3 flex items-center justify-between">
-                <p className="text-xs font-bold text-red-500 uppercase tracking-wider">Total Spent (all entries)</p>
-                <p className="text-xl font-black text-red-600">−₹{Math.abs(totExp).toFixed(0)}</p>
+              <div className="rounded-2xl border border-rose-200/70 dark:border-rose-500/20 bg-rose-50/80 dark:bg-rose-500/10 backdrop-blur-xl p-3 flex items-center justify-between shadow-sm">
+                <p className="text-xs font-bold text-rose-500 uppercase tracking-wider">Total Spent (all entries)</p>
+                <p className="text-xl font-black text-rose-500">-₹{Math.abs(totExp).toFixed(0)}</p>
               </div>
             );
           })()}
 
           {/* Ledger table */}
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm overflow-x-auto">
+          <div className="rounded-2xl border border-slate-200/70 dark:border-white/10 bg-white/90 dark:bg-slate-900/70 backdrop-blur-xl ring-1 ring-black/[0.03] dark:ring-white/5 shadow-lg shadow-slate-200/40 dark:shadow-black/40 overflow-hidden overflow-x-auto">
             <table className="w-full text-xs min-w-[760px] border-collapse">
-              <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
+              <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200/70 dark:border-white/10">
                 <tr>
                   {['Date','Source','Spent By','Category','Description','Expense','Credit','Balance'].map(h => (
                     <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+              <tbody className="divide-y divide-slate-100/70 dark:divide-white/5">
                 {(() => {
                     const bySource = ledgerSourceFilter === 'all'
                       ? ledger
@@ -1958,33 +2054,33 @@ const ExpensesPage: React.FC = () => {
                       : bySource;
                     if (fl.length === 0) return (<tr><td colSpan={8} className="py-10 text-center text-slate-400 text-sm">{ledgerSearch || ledgerSourceFilter !== 'all' ? 'No matching entries' : 'No approved entries'}</td></tr>);
                     return fl.map((r, i) => (
-                    <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/40 align-top">
-                      <td className="px-3 py-2 whitespace-nowrap text-slate-500 text-xs">{r.date}</td>
+                    <tr key={i} className="hover:bg-indigo-50/40 dark:hover:bg-white/[0.03] align-top transition-colors">
+                      <td className="px-3 py-2 whitespace-nowrap text-slate-500 text-xs font-mono">{r.date}</td>
                       <td className="px-3 py-2">
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${
-                          r.source==='Field'    ? 'bg-blue-100 text-blue-700' :
-                          r.source==='Employee' ? 'bg-violet-100 text-violet-700' :
-                          r.source==='Credit'   ? 'bg-green-100 text-green-700' :
-                                                  'bg-slate-100 text-slate-600'}`}>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${
+                          r.source==='Field'    ? 'bg-indigo-500/10 text-indigo-500' :
+                          r.source==='Employee' ? 'bg-violet-500/10 text-violet-500' :
+                          r.source==='Credit'   ? 'bg-emerald-500/10 text-emerald-500' :
+                                                  'bg-slate-500/10 text-slate-500'}`}>
                           {r.source}
                         </span>
                       </td>
                       <td className="px-3 py-2 font-semibold text-slate-800 dark:text-slate-100 text-xs whitespace-nowrap">{r.person}</td>
                       <td className="px-3 py-2 text-slate-500 dark:text-slate-400 text-xs whitespace-nowrap">{r.category}</td>
                       <td className="px-3 py-2 text-slate-500 dark:text-slate-400 text-xs max-w-[180px] truncate">{r.desc}</td>
-                      <td className="px-3 py-2 text-xs font-bold whitespace-nowrap">
+                      <td className="px-3 py-2 text-xs font-bold font-mono whitespace-nowrap">
                         {r.expense < 0
-                          ? <span className="text-red-600">−₹{Math.abs(r.expense).toFixed(0)}</span>
-                          : <span className="text-slate-300">—</span>}
+                          ? <span className="text-rose-500">-₹{Math.abs(r.expense).toFixed(0)}</span>
+                          : <span className="text-slate-300 dark:text-slate-600">—</span>}
                       </td>
-                      <td className="px-3 py-2 text-xs font-bold whitespace-nowrap">
+                      <td className="px-3 py-2 text-xs font-bold font-mono whitespace-nowrap">
                         {r.credit > 0
-                          ? <span className="text-green-600">+₹{r.credit.toFixed(0)}</span>
-                          : <span className="text-slate-300">—</span>}
+                          ? <span className="text-emerald-500">+₹{r.credit.toFixed(0)}</span>
+                          : <span className="text-slate-300 dark:text-slate-600">—</span>}
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap">
-                        <span className={`font-black text-xs ${r.running >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {r.running >= 0 ? '+' : '−'}₹{Math.abs(r.running).toFixed(0)}
+                        <span className={`inline-block px-2 py-0.5 rounded-full font-black text-[11px] font-mono ${r.running >= 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                          {r.running >= 0 ? '+' : '-'}₹{Math.abs(r.running).toFixed(0)}
                         </span>
                       </td>
                     </tr>
@@ -2304,7 +2400,7 @@ const ExpensesPage: React.FC = () => {
             <Button variant="outline" onClick={() => { setIsCreditOpen(false); setEditCreditId(null); setCreditForm(EMPTY_CREDIT_FORM); }}>
               Cancel
             </Button>
-            <Button className="bg-green-600 hover:bg-green-700" onClick={saveCredit} disabled={savingCredit}>
+            <Button className="bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 shadow-md shadow-emerald-500/25 border-0" onClick={saveCredit} disabled={savingCredit}>
               {savingCredit ? 'Saving...' : editCreditId ? 'Update' : 'Add Credit'}
             </Button>
           </DialogFooter>
