@@ -22,6 +22,38 @@ self.addEventListener('activate', e => {
   );
 });
 
+// Push: show native notification when server sends a push
+self.addEventListener('push', e => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch (err) { data = { title: 'Connect Pro', body: e.data ? e.data.text() : '' }; }
+
+  const title = data.title || 'Connect Pro';
+  const options = {
+    body: data.body || '',
+    icon: data.icon || '/icon-192.png',
+    badge: '/icon-192.png',
+    data: { url: data.url || '/' },
+    vibrate: [200, 100, 200],
+    tag: data.tag || undefined,
+    renotify: !!data.tag,
+  };
+
+  e.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Notification click: focus existing tab or open a new one
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientsArr => {
+      const existing = clientsArr.find(c => c.url.includes(self.location.origin));
+      if (existing) { existing.focus(); existing.navigate(url); return; }
+      return self.clients.openWindow(url);
+    })
+  );
+});
+
 // Fetch: network first, fallback to cache
 self.addEventListener('fetch', e => {
   // Skip non-GET and Supabase API calls (always need fresh data)
