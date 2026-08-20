@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { X, Star, Zap, Trophy } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { showNativeNotification } from '@/lib/pushNotifications';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface ActivityItem {
@@ -166,6 +167,8 @@ export const RecentActivityPanel: React.FC = () => {
           });
         });
 
+        // Native notification for brand-new announcements (fires only once via seenAnnouncementIds below)
+
         // Last call
         if (callRes.data?.length) {
           const c = callRes.data[0];
@@ -201,9 +204,17 @@ export const RecentActivityPanel: React.FC = () => {
     // Realtime — invalidate cache on new events (no poll to save battery)
     const ch = supabase.channel(`ra-panel-${user.id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leads' }, (p) => {
-        if (p.new?.status === 'Complete') { activityCacheTime = 0; load(); }
+        if (p.new?.status === 'Complete' && p.old?.status !== 'Complete') {
+          activityCacheTime = 0; load();
+          if (p.new?.assigned_to === user.id) {
+            showNativeNotification('🏆 Sale Closed!', `Well done ${profile.name}! You closed "${p.new?.name || 'a lead'}"`, { tag: `sale-${p.new?.id}` });
+          }
+        }
       })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'announcements' }, () => { activityCacheTime = 0; load(); })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'announcements' }, (p) => {
+        activityCacheTime = 0; load();
+        showNativeNotification('📢 New Announcement', p.new?.title || 'Check the announcements page', { url: '/announcements', tag: `ann-${p.new?.id}` });
+      })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_attempts' }, () => { activityCacheTime = 0; load(); })
       .subscribe();
 
@@ -279,6 +290,9 @@ const CelebrationSystem: React.FC = () => {
             if (data) empName = data.name;
           }
           setCelebration({ uid: newLead.id, employeeName: empName, leadName: newLead.name });
+          if (newLead.assigned_to !== profile.id) {
+            showNativeNotification('🏆 Team Update', `${empName} closed a sale: "${newLead.name}"`, { tag: `team-sale-${newLead.id}` });
+          }
         }
       ).subscribe();
 
