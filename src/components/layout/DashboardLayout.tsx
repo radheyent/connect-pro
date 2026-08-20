@@ -1,6 +1,7 @@
 import React from 'react';
 import CelebrationSystem, { RecentActivityPanel } from '@/components/CelebrationSystem';
 import PWAInstallButton from '@/components/PWAInstallButton';
+import NotificationPrompt from '@/components/NotificationPrompt';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -325,6 +326,7 @@ const DashboardLayout: React.FC = () => {
       </div>
 
       <CelebrationSystem />
+      <NotificationPrompt />
     </div>
   );
 };
