@@ -21,6 +21,9 @@ export interface UserProfile {
   role: Role;
   is_active: boolean;
   created_at: string;
+  email?: string | null;
+  phone?: string | null;
+  last_sign_in_at?: string | null;
 }
 
 export interface Lead {
