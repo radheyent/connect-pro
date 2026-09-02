@@ -44,12 +44,24 @@ self.addEventListener('push', e => {
 // Notification click: focus existing tab or open a new one
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  const url = (e.notification.data && e.notification.data.url) || '/';
+  const rawUrl = (e.notification.data && e.notification.data.url) || '/';
+  const destUrl = new URL(rawUrl, self.location.origin).href;
+
   e.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientsArr => {
-      const existing = clientsArr.find(c => c.url.includes(self.location.origin));
-      if (existing) { existing.focus(); existing.navigate(url); return; }
-      return self.clients.openWindow(url);
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async clientsArr => {
+      const existing = clientsArr.find(c => c.url.startsWith(self.location.origin));
+      if (existing) {
+        try {
+          await existing.focus();
+          if ('navigate' in existing) {
+            await existing.navigate(destUrl);
+            return;
+          }
+        } catch (err) {
+          // navigate not supported/failed — fall through to opening a new window
+        }
+      }
+      return self.clients.openWindow(destUrl);
     })
   );
 });
