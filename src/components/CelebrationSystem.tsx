@@ -100,6 +100,12 @@ let activityCache: ActivityItem[] = [];
 let activityCacheTime = 0;
 const CACHE_TTL = 30_000; // 30 seconds
 
+// Tracks which lead IDs we've already fired a "Sale Closed" push for, so that
+// unrelated edits to an already-Complete lead (notes, admin edits, etc.) don't
+// keep re-triggering the notification and draining battery.
+const notifiedSaleIds = new Set<string>();
+const notifiedAnnouncementIds = new Set<string>();
+
 export const RecentActivityPanel: React.FC = () => {
   const { user, profile } = useAuth();
   const [items, setItems]   = useState<ActivityItem[]>(activityCache);
@@ -203,10 +209,11 @@ export const RecentActivityPanel: React.FC = () => {
 
     // Realtime — invalidate cache on new events (no poll to save battery)
     const ch = supabase.channel(`ra-panel-${user.id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leads' }, (p) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leads', filter: 'status=eq.Complete' }, (p) => {
         if (p.new?.status === 'Complete' && p.old?.status !== 'Complete') {
           activityCacheTime = 0; load();
-          if (p.new?.assigned_to === user.id) {
+          if (p.new?.assigned_to === user.id && !notifiedSaleIds.has(p.new.id)) {
+            notifiedSaleIds.add(p.new.id);
             const destUrl = profile.role === 'admin' ? '/admin/leads' : '/employee/leads';
             showNativeNotification('🏆 Sale Closed!', `Well done ${profile.name}! You closed "${p.new?.name || 'a lead'}"`, { url: destUrl, tag: `sale-${p.new?.id}` });
           }
@@ -214,6 +221,8 @@ export const RecentActivityPanel: React.FC = () => {
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'announcements' }, (p) => {
         activityCacheTime = 0; load();
+        if (notifiedAnnouncementIds.has(p.new?.id)) return;
+        notifiedAnnouncementIds.add(p.new?.id);
         const annTitle = p.new?.title || 'New Announcement';
         const annBody = p.new?.content || 'Tap to view the announcement';
         showNativeNotification(`📢 ${annTitle}`, annBody, { url: '/announcements', tag: `ann-${p.new?.id}` });
@@ -278,7 +287,7 @@ const CelebrationSystem: React.FC = () => {
 
     const channel = supabase.channel(`celebrate-${profile.id}`)
       .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'leads' },
+        { event: 'UPDATE', schema: 'public', table: 'leads', filter: 'status=eq.Complete' },
         async (payload) => {
           const newLead = payload.new as any;
           const oldLead = payload.old as any;
