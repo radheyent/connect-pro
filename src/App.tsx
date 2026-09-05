@@ -10,7 +10,8 @@ import LeadManagement from './pages/Admin/LeadManagement';
 import FakeCallsPanel from './pages/Admin/FakeCallsPanel';
 import ReportsPage from './pages/Admin/ReportsPage';
 import BackupPage from './pages/Admin/BackupPage';
-import ExpensesPage from './pages/Admin/ExpensesPage';
+import StoreExpensesPage from './pages/Admin/StoreExpensesPage';
+import FieldExpensesPage from './pages/Admin/FieldExpensesPage';
 import EmployeeLeadsPage from './pages/Employee/EmployeeLeadsPage';
 import EmployeeExpensesPage from './pages/Employee/EmployeeExpensesPage';
 import AnnouncementsPage from './pages/AnnouncementsPage';
@@ -113,7 +114,9 @@ function App() {
               <Route path="fake-calls" element={<FakeCallsPanel />} />
               <Route path="reports"    element={<ReportsPage />} />
               <Route path="backup"     element={<BackupPage />} />
-              <Route path="expenses"   element={<ExpensesPage />} />
+              <Route path="expenses/store" element={<StoreExpensesPage />} />
+              <Route path="expenses/field" element={<FieldExpensesPage />} />
+              <Route path="expenses" element={<StoreExpensesPage />} />
             </Route>
 
             {/* ── Employee routes ── */}
