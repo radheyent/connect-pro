@@ -111,6 +111,20 @@ const FieldExpensesPage: React.FC = () => {
   const approvedTotal = monthAll.filter(r => r.status === 'approved').reduce((s, r) => s + totalAmount(r), 0);
   const pendingTotal = monthAll.filter(r => r.status === 'pending').reduce((s, r) => s + totalAmount(r), 0);
 
+  // Per-employee breakdown for the selected month — split by Field vs Employee expense,
+  // approved entries only (so numbers reflect actual payable amounts).
+  const userBreakdown = useMemo(() => {
+    const map: Record<string, { name: string; fieldTotal: number; employeeTotal: number; fieldCount: number; employeeCount: number }> = {};
+    monthAll.forEach(r => {
+      if (r.status !== 'approved') return;
+      const uid = r.source === 'field' ? (r as FieldExpense).field_boy_id : (r as EmployeeExpense).user_id;
+      if (!map[uid]) map[uid] = { name: r.userName, fieldTotal: 0, employeeTotal: 0, fieldCount: 0, employeeCount: 0 };
+      if (r.source === 'field') { map[uid].fieldTotal += totalAmount(r); map[uid].fieldCount += 1; }
+      else { map[uid].employeeTotal += totalAmount(r); map[uid].employeeCount += 1; }
+    });
+    return Object.values(map).sort((a, b) => (b.fieldTotal + b.employeeTotal) - (a.fieldTotal + a.employeeTotal));
+  }, [monthAll]);
+
   const approve = async (row: CombinedRow) => {
     try {
       const table = row.source === 'field' ? 'field_expenses' : 'employee_expenses';
@@ -230,6 +244,53 @@ const FieldExpensesPage: React.FC = () => {
             <MapPin className="h-4 w-4" /> Total Entries
           </div>
           <p className="text-2xl font-bold text-slate-800">{monthAll.length}</p>
+        </div>
+      </div>
+
+      {/* Per-employee monthly breakdown */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+          <h3 className="text-sm font-semibold text-slate-700">Employee-wise Total — {format(parseISO(month + '-01'), 'MMMM yyyy')}</h3>
+          <p className="text-[11px] text-slate-400 mt-0.5">Approved amounts only</p>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {userBreakdown.length === 0 ? (
+            <div className="p-6 text-center text-slate-400 text-sm">Is mahine ka koi approved data nahi hai</div>
+          ) : userBreakdown.map((u) => (
+            <div key={u.name} className="flex items-center justify-between gap-3 p-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="h-9 w-9 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                  {u.name.split(' ').map(n => n[0]).join('').toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-800 text-sm">{u.name}</p>
+                  <p className="text-[11px] text-slate-400">
+                    {u.fieldCount > 0 && `${u.fieldCount} field entr${u.fieldCount > 1 ? 'ies' : 'y'}`}
+                    {u.fieldCount > 0 && u.employeeCount > 0 && ' • '}
+                    {u.employeeCount > 0 && `${u.employeeCount} expense entr${u.employeeCount > 1 ? 'ies' : 'y'}`}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4 shrink-0 text-right">
+                {u.fieldCount > 0 && (
+                  <div>
+                    <p className="text-[10px] text-orange-500 font-semibold uppercase">Field</p>
+                    <p className="text-sm font-bold text-slate-700">₹{u.fieldTotal.toLocaleString('en-IN')}</p>
+                  </div>
+                )}
+                {u.employeeCount > 0 && (
+                  <div>
+                    <p className="text-[10px] text-blue-500 font-semibold uppercase">Expense</p>
+                    <p className="text-sm font-bold text-slate-700">₹{u.employeeTotal.toLocaleString('en-IN')}</p>
+                  </div>
+                )}
+                <div className="pl-3 border-l border-slate-200">
+                  <p className="text-[10px] text-slate-400 font-semibold uppercase">Total</p>
+                  <p className="text-base font-bold text-slate-900">₹{(u.fieldTotal + u.employeeTotal).toLocaleString('en-IN')}</p>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
