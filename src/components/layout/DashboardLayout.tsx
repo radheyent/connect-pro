@@ -7,7 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import {
   LayoutDashboard, Users, Share2, PhoneMissed,
   BarChart3, Database, LogOut, Menu, Sun, Moon,
-  Bell, Wallet, Car, Receipt, ExternalLink
+  Bell, Wallet, Car, Receipt, ExternalLink, Truck
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -21,7 +21,8 @@ const PAGE_TITLES: Record<string, string> = {
   '/admin/fake-calls':        'Fake Calls',
   '/admin/reports':           'Reports',
   '/admin/backup':            'Backup & Reset',
-  '/admin/expenses':          'Expenses',
+  '/admin/expenses/store':     'Store Expenses',
+  '/admin/expenses/field':     'Field Expenses',
   '/employee':                'My Dashboard',
   '/employee/leads':          'My Leads',
   '/employee/expenses':       'My Expenses',
@@ -99,7 +100,8 @@ const DashboardLayout: React.FC = () => {
       { name: 'All Leads',      path: '/admin/leads',        icon: Share2,          roles: ['admin'] },
       { name: 'Fake Calls',     path: '/admin/fake-calls',   icon: PhoneMissed,     roles: ['admin'] },
       { name: 'Reports',        path: '/admin/reports',      icon: BarChart3,       roles: ['admin'] },
-      { name: 'Expenses',       path: '/admin/expenses',     icon: Wallet,          roles: ['admin'] },
+      { name: 'Store Expenses', path: '/admin/expenses/store',  icon: Wallet,          roles: ['admin'] },
+      { name: 'Field Expenses', path: '/admin/expenses/field',  icon: Truck,           roles: ['admin'] },
       { name: 'Backup',         path: '/admin/backup',       icon: Database,        roles: ['admin'] },
       // ── Employee ──
       { name: 'My Leads',       path: '/employee/leads',     icon: Users,           roles: ['employee'] },
