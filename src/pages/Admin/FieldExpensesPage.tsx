@@ -23,8 +23,8 @@ interface FieldExpense {
   field_boy_id: string;
   expense_date: string;
   kilometres: number;
-  conveyance_amount: number;
-  credit_total: number;
+  conveyance_amount: number; // DR — money the company spent
+  credit_total: number;      // CR — money collected back from the customer
   description: string | null;
   status: 'pending' | 'approved' | 'rejected';
   admin_comment: string | null;
@@ -35,7 +35,7 @@ interface EmployeeExpense {
   user_id: string;
   category: string;
   custom_category: string | null;
-  amount: number;
+  amount: number; // always DR — employees don't collect credit
   description: string;
   expense_date: string;
   status: 'pending' | 'approved' | 'rejected';
@@ -59,9 +59,17 @@ const FieldExpensesPage: React.FC = () => {
   const [addForm, setAddForm] = useState(EMPTY_FIELD_FORM);
   const [saving, setSaving] = useState(false);
 
+  const [editTarget, setEditTarget] = useState<CombinedRow | null>(null);
+  const [editForm, setEditForm] = useState<any>({});
+
   const [rejectTarget, setRejectTarget] = useState<CombinedRow | null>(null);
   const [rejectComment, setRejectComment] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<CombinedRow | null>(null);
+
+  // Bulk select
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // Bulk upload (field expenses)
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -113,25 +121,48 @@ const FieldExpensesPage: React.FC = () => {
     ...employeeExpenses.map(e => ({ ...e, userName: userMap[e.user_id] || 'Unknown' })),
   ].filter(r => r.expense_date?.startsWith(month)), [fieldExpenses, employeeExpenses, userMap, month]);
 
-  const totalAmount = (r: CombinedRow) => r.source === 'field' ? Number(r.conveyance_amount) + Number(r.credit_total || 0) : Number(r.amount);
+  // ── Correct DR/CR split ──────────────────────────────────────────────
+  // Field: conveyance_amount is what the company spent (DR); credit_total is what
+  // was collected back from the customer (CR). These are NOT added together —
+  // they are two separate ledger lines. Employee expenses have no credit concept.
+  const debitOf = (r: CombinedRow) => r.source === 'field' ? Number((r as FieldExpense).conveyance_amount) : Number((r as EmployeeExpense).amount);
+  const creditOf = (r: CombinedRow) => r.source === 'field' ? Number((r as FieldExpense).credit_total || 0) : 0;
+  const netOf = (r: CombinedRow) => debitOf(r) - creditOf(r);
 
   const pendingCount = monthAll.filter(r => r.status === 'pending').length;
-  const approvedTotal = monthAll.filter(r => r.status === 'approved').reduce((s, r) => s + totalAmount(r), 0);
-  const pendingTotal = monthAll.filter(r => r.status === 'pending').reduce((s, r) => s + totalAmount(r), 0);
+  const approvedRows = monthAll.filter(r => r.status === 'approved');
+  const totalDebit = approvedRows.reduce((s, r) => s + debitOf(r), 0);
+  const totalCredit = approvedRows.reduce((s, r) => s + creditOf(r), 0);
+  const netPayable = totalDebit - totalCredit;
+  const pendingTotal = monthAll.filter(r => r.status === 'pending').reduce((s, r) => s + netOf(r), 0);
 
-  // Per-employee breakdown for the selected month — split by Field vs Employee expense,
-  // approved entries only (so numbers reflect actual payable amounts).
+  // Per-employee breakdown, split cleanly into Debit / Credit / Net
   const userBreakdown = useMemo(() => {
-    const map: Record<string, { name: string; fieldTotal: number; employeeTotal: number; fieldCount: number; employeeCount: number }> = {};
-    monthAll.forEach(r => {
-      if (r.status !== 'approved') return;
+    const map: Record<string, { name: string; fieldDebit: number; fieldCredit: number; employeeTotal: number; fieldCount: number; employeeCount: number }> = {};
+    approvedRows.forEach(r => {
       const uid = r.source === 'field' ? (r as FieldExpense).field_boy_id : (r as EmployeeExpense).user_id;
-      if (!map[uid]) map[uid] = { name: r.userName, fieldTotal: 0, employeeTotal: 0, fieldCount: 0, employeeCount: 0 };
-      if (r.source === 'field') { map[uid].fieldTotal += totalAmount(r); map[uid].fieldCount += 1; }
-      else { map[uid].employeeTotal += totalAmount(r); map[uid].employeeCount += 1; }
+      if (!map[uid]) map[uid] = { name: r.userName, fieldDebit: 0, fieldCredit: 0, employeeTotal: 0, fieldCount: 0, employeeCount: 0 };
+      if (r.source === 'field') { map[uid].fieldDebit += debitOf(r); map[uid].fieldCredit += creditOf(r); map[uid].fieldCount += 1; }
+      else { map[uid].employeeTotal += debitOf(r); map[uid].employeeCount += 1; }
     });
-    return Object.values(map).sort((a, b) => (b.fieldTotal + b.employeeTotal) - (a.fieldTotal + a.employeeTotal));
-  }, [monthAll]);
+    return Object.values(map).sort((a, b) => (b.fieldDebit + b.employeeTotal) - (a.fieldDebit + a.employeeTotal));
+  }, [approvedRows]);
+
+  // ── Selection ────────────────────────────────────────────────────────
+  const rowKey = (r: CombinedRow) => `${r.source}-${r.id}`;
+  const allSelected = combined.length > 0 && combined.every(r => selectedKeys.has(rowKey(r)));
+  const toggleSelectAll = () => {
+    if (allSelected) setSelectedKeys(new Set());
+    else setSelectedKeys(new Set(combined.map(rowKey)));
+  };
+  const toggleSelectOne = (r: CombinedRow) => {
+    setSelectedKeys(prev => {
+      const next = new Set(prev);
+      const k = rowKey(r);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+  };
 
   const approve = async (row: CombinedRow) => {
     try {
@@ -172,9 +203,33 @@ const FieldExpensesPage: React.FC = () => {
     } catch (e: any) { toast.error(e.message); }
   };
 
+  const handleBulkDelete = async () => {
+    setBulkDeleting(true);
+    try {
+      const fieldIds = combined.filter(r => r.source === 'field' && selectedKeys.has(rowKey(r))).map(r => r.id);
+      const empIds = combined.filter(r => r.source === 'employee' && selectedKeys.has(rowKey(r))).map(r => r.id);
+      if (fieldIds.length) {
+        const { error } = await supabase.from('field_expenses').delete().in('id', fieldIds);
+        if (error) throw error;
+      }
+      if (empIds.length) {
+        const { error } = await supabase.from('employee_expenses').delete().in('id', empIds);
+        if (error) throw error;
+      }
+      toast.success(`${selectedKeys.size} entries deleted`);
+      setSelectedKeys(new Set());
+      setBulkDeleteOpen(false);
+      fetchAll();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   const saveFieldAdd = async () => {
     if (!addForm.field_boy_id) { toast.error('Employee chuno'); return; }
-    if (!addForm.conveyance_amount || parseFloat(addForm.conveyance_amount) <= 0) { toast.error('Amount daalo'); return; }
+    if (!addForm.conveyance_amount || parseFloat(addForm.conveyance_amount) <= 0) { toast.error('Conveyance amount daalo'); return; }
     setSaving(true);
     try {
       const payload = {
@@ -197,23 +252,77 @@ const FieldExpensesPage: React.FC = () => {
     } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
   };
 
+  // ── Edit ─────────────────────────────────────────────────────────────
+  const openEdit = (row: CombinedRow) => {
+    setEditTarget(row);
+    if (row.source === 'field') {
+      const f = row as FieldExpense;
+      setEditForm({
+        expense_date: f.expense_date, kilometres: String(f.kilometres || 0),
+        conveyance_amount: String(f.conveyance_amount), credit_total: String(f.credit_total || 0),
+        description: f.description || '',
+      });
+    } else {
+      const e = row as EmployeeExpense;
+      setEditForm({
+        expense_date: e.expense_date, category: e.category, custom_category: e.custom_category || '',
+        amount: String(e.amount), description: e.description,
+      });
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editTarget) return;
+    setSaving(true);
+    try {
+      if (editTarget.source === 'field') {
+        const payload = {
+          expense_date: editForm.expense_date,
+          kilometres: parseFloat(editForm.kilometres) || 0,
+          conveyance_amount: parseFloat(editForm.conveyance_amount) || 0,
+          credit_total: parseFloat(editForm.credit_total) || 0,
+          description: editForm.description?.trim() || null,
+          updated_at: new Date().toISOString(),
+        };
+        const { error } = await supabase.from('field_expenses').update(payload).eq('id', editTarget.id);
+        if (error) throw error;
+      } else {
+        const payload = {
+          expense_date: editForm.expense_date,
+          category: editForm.category,
+          custom_category: editForm.category === 'other' ? (editForm.custom_category || null) : null,
+          amount: parseFloat(editForm.amount) || 0,
+          description: editForm.description?.trim() || '',
+          updated_at: new Date().toISOString(),
+        };
+        const { error } = await supabase.from('employee_expenses').update(payload).eq('id', editTarget.id);
+        if (error) throw error;
+      }
+      toast.success('Updated');
+      setEditTarget(null);
+      fetchAll();
+    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+  };
+
   // ── Bulk Upload (Field Expenses) ────────────────────────────────────
   const downloadSample = () => {
     const empNames = users.map(u => u.name);
     const sampleRows = [
-      { 'Date (YYYY-MM-DD)': format(new Date(), 'yyyy-MM-dd'), 'Employee Name': empNames[0] || 'Ram', Kilometres: 12, 'Conveyance Amount': 60, 'Credit/Extra': 0, Description: 'Field visit' },
+      { 'Date (YYYY-MM-DD)': format(new Date(), 'yyyy-MM-dd'), 'Employee Name': empNames[0] || 'Ram', Kilometres: 12, 'Conveyance Amount (DR)': 150, 'Credit Collected (CR)': 150, Description: 'Field visit' },
     ];
     const infoRows = [
+      { '': 'Conveyance Amount = company spend (debit)' },
+      { '': 'Credit Collected = money collected back from customer (credit) — leave 0 if none' },
       { '': 'EMPLOYEE NAME — must match exactly (case-insensitive):' },
       ...empNames.map(n => ({ '': n })),
     ];
     const wb = XLSX.utils.book_new();
     const ws1 = XLSX.utils.json_to_sheet(sampleRows);
-    ws1['!cols'] = [{ wch: 18 }, { wch: 18 }, { wch: 12 }, { wch: 18 }, { wch: 14 }, { wch: 25 }];
+    ws1['!cols'] = [{ wch: 18 }, { wch: 18 }, { wch: 12 }, { wch: 22 }, { wch: 20 }, { wch: 25 }];
     XLSX.utils.book_append_sheet(wb, ws1, 'Field Expenses');
     const ws2 = XLSX.utils.json_to_sheet(infoRows);
-    ws2['!cols'] = [{ wch: 40 }];
-    XLSX.utils.book_append_sheet(wb, ws2, 'Employee Names');
+    ws2['!cols'] = [{ wch: 45 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Instructions');
     XLSX.writeFile(wb, 'FieldExpense_Sample.xlsx');
   };
 
@@ -235,8 +344,8 @@ const FieldExpensesPage: React.FC = () => {
           const date = String(row['Date (YYYY-MM-DD)'] || '').trim();
           const empName = String(row['Employee Name'] || '').trim();
           const km = parseFloat(String(row['Kilometres'] || '0').replace(/[^0-9.]/g, '')) || 0;
-          const conveyance = parseFloat(String(row['Conveyance Amount'] || '').replace(/[^0-9.]/g, ''));
-          const credit = parseFloat(String(row['Credit/Extra'] || '0').replace(/[^0-9.]/g, '')) || 0;
+          const conveyance = parseFloat(String(row['Conveyance Amount (DR)'] || '').replace(/[^0-9.]/g, ''));
+          const credit = parseFloat(String(row['Credit Collected (CR)'] || '0').replace(/[^0-9.]/g, '')) || 0;
           const desc = String(row['Description'] || '').trim();
           const empId = nameToIdMap[empName.toLowerCase()];
 
@@ -317,25 +426,35 @@ const FieldExpensesPage: React.FC = () => {
         <Button variant="ghost" size="sm" onClick={() => shiftMonth(1)}><ChevronRight className="h-4 w-4" /></Button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white rounded-xl border border-amber-100 p-4 shadow-sm">
-          <div className="flex items-center gap-2 text-amber-600 text-xs font-semibold uppercase mb-1">
-            <Clock className="h-4 w-4" /> Pending
+      {/* Summary cards — DR/CR shown separately, never merged */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-white rounded-xl border border-amber-100 p-3.5 shadow-sm">
+          <div className="flex items-center gap-1.5 text-amber-600 text-[10px] font-semibold uppercase mb-1">
+            <Clock className="h-3.5 w-3.5" /> Pending
           </div>
-          <p className="text-2xl font-bold text-slate-800">{pendingCount}</p>
-          <p className="text-[11px] text-slate-400 mt-1">₹{pendingTotal.toLocaleString('en-IN')} awaiting approval</p>
+          <p className="text-xl font-bold text-slate-800">{pendingCount}</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">₹{pendingTotal.toLocaleString('en-IN')} net</p>
         </div>
-        <div className="bg-white rounded-xl border border-green-100 p-4 shadow-sm">
-          <div className="flex items-center gap-2 text-green-600 text-xs font-semibold uppercase mb-1">
-            <Check className="h-4 w-4" /> Approved This Month
+        <div className="bg-white rounded-xl border border-red-100 p-3.5 shadow-sm">
+          <div className="flex items-center gap-1.5 text-red-500 text-[10px] font-semibold uppercase mb-1">
+            DR — Conveyance
           </div>
-          <p className="text-2xl font-bold text-slate-800">₹{approvedTotal.toLocaleString('en-IN')}</p>
+          <p className="text-xl font-bold text-slate-800">₹{totalDebit.toLocaleString('en-IN')}</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">Company spent</p>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-          <div className="flex items-center gap-2 text-slate-600 text-xs font-semibold uppercase mb-1">
-            <MapPin className="h-4 w-4" /> Total Entries
+        <div className="bg-white rounded-xl border border-green-100 p-3.5 shadow-sm">
+          <div className="flex items-center gap-1.5 text-green-600 text-[10px] font-semibold uppercase mb-1">
+            CR — Collected
           </div>
-          <p className="text-2xl font-bold text-slate-800">{monthAll.length}</p>
+          <p className="text-xl font-bold text-slate-800">₹{totalCredit.toLocaleString('en-IN')}</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">From customers</p>
+        </div>
+        <div className="bg-white rounded-xl border border-blue-100 p-3.5 shadow-sm">
+          <div className="flex items-center gap-1.5 text-blue-600 text-[10px] font-semibold uppercase mb-1">
+            Net Payable
+          </div>
+          <p className="text-xl font-bold text-slate-800">₹{netPayable.toLocaleString('en-IN')}</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">DR − CR</p>
         </div>
       </div>
 
@@ -343,7 +462,7 @@ const FieldExpensesPage: React.FC = () => {
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
           <h3 className="text-sm font-semibold text-slate-700">Employee-wise Total — {format(parseISO(month + '-01'), 'MMMM yyyy')}</h3>
-          <p className="text-[11px] text-slate-400 mt-0.5">Approved amounts only</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">Approved amounts only • DR = spent, CR = collected</p>
         </div>
         <div className="divide-y divide-slate-100 md:divide-y-0 md:grid md:grid-cols-2 md:gap-px md:bg-slate-100">
           {userBreakdown.length === 0 ? (
@@ -365,20 +484,26 @@ const FieldExpensesPage: React.FC = () => {
               </div>
               <div className="flex items-center gap-2 shrink-0 text-right">
                 {u.fieldCount > 0 && (
-                  <div>
-                    <p className="text-[9px] text-orange-500 font-semibold uppercase leading-tight">Field</p>
-                    <p className="text-xs font-bold text-slate-700 leading-tight">₹{u.fieldTotal.toLocaleString('en-IN')}</p>
-                  </div>
+                  <>
+                    <div>
+                      <p className="text-[9px] text-red-500 font-semibold uppercase leading-tight">DR</p>
+                      <p className="text-xs font-bold text-slate-700 leading-tight">₹{u.fieldDebit.toLocaleString('en-IN')}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] text-green-600 font-semibold uppercase leading-tight">CR</p>
+                      <p className="text-xs font-bold text-slate-700 leading-tight">₹{u.fieldCredit.toLocaleString('en-IN')}</p>
+                    </div>
+                  </>
                 )}
                 {u.employeeCount > 0 && (
                   <div>
-                    <p className="text-[9px] text-blue-500 font-semibold uppercase leading-tight">Exp</p>
+                    <p className="text-[9px] text-purple-500 font-semibold uppercase leading-tight">Exp</p>
                     <p className="text-xs font-bold text-slate-700 leading-tight">₹{u.employeeTotal.toLocaleString('en-IN')}</p>
                   </div>
                 )}
                 <div className="pl-2 border-l border-slate-200">
-                  <p className="text-[9px] text-slate-400 font-semibold uppercase leading-tight">Total</p>
-                  <p className="text-sm font-bold text-slate-900 leading-tight">₹{(u.fieldTotal + u.employeeTotal).toLocaleString('en-IN')}</p>
+                  <p className="text-[9px] text-slate-400 font-semibold uppercase leading-tight">Net</p>
+                  <p className="text-sm font-bold text-slate-900 leading-tight">₹{(u.fieldDebit - u.fieldCredit + u.employeeTotal).toLocaleString('en-IN')}</p>
                 </div>
               </div>
             </div>
@@ -386,68 +511,106 @@ const FieldExpensesPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <Select value={statusFilter} onValueChange={(v: any) => setStatusFilter(v)}>
-          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="approved">Approved</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={userFilter} onValueChange={setUserFilter}>
-          <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Employees</SelectItem>
-            {users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-wrap gap-3 items-center justify-between">
+        <div className="flex flex-wrap gap-3">
+          <Select value={statusFilter} onValueChange={(v: any) => setStatusFilter(v)}>
+            <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="approved">Approved</SelectItem>
+              <SelectItem value="rejected">Rejected</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={userFilter} onValueChange={setUserFilter}>
+            <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Employees</SelectItem>
+              {users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        {selectedKeys.size > 0 && (
+          <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => setBulkDeleteOpen(true)}>
+            <Trash2 className="h-4 w-4 mr-1" /> Delete {selectedKeys.size} Selected
+          </Button>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        {combined.length > 0 && (
+          <div className="flex items-center gap-2 px-4 py-2 border-b border-slate-100 bg-slate-50">
+            <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="h-4 w-4 rounded border-slate-300" />
+            <span className="text-xs text-slate-500 font-medium">Select all</span>
+          </div>
+        )}
         <div className="divide-y divide-slate-100">
           {loading ? (
             <div className="p-10 text-center text-slate-400 text-sm">Loading...</div>
           ) : combined.length === 0 ? (
             <div className="p-10 text-center text-slate-400 text-sm">Is filter me koi entry nahi hai</div>
-          ) : combined.map((row) => (
-            <div key={`${row.source}-${row.id}`} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 hover:bg-slate-50">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="h-9 w-9 rounded-full bg-orange-50 text-orange-600 flex items-center justify-center shrink-0">
-                  <User className="h-4 w-4" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium text-slate-800 text-sm">{row.userName}</p>
-                    <StatusBadge status={row.status} />
+          ) : combined.map((row) => {
+            const dr = debitOf(row);
+            const cr = creditOf(row);
+            return (
+              <div key={rowKey(row)} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 hover:bg-slate-50">
+                <div className="flex items-center gap-3 min-w-0">
+                  <input
+                    type="checkbox"
+                    checked={selectedKeys.has(rowKey(row))}
+                    onChange={() => toggleSelectOne(row)}
+                    className="h-4 w-4 rounded border-slate-300 shrink-0"
+                  />
+                  <div className="h-9 w-9 rounded-full bg-orange-50 text-orange-600 flex items-center justify-center shrink-0">
+                    <User className="h-4 w-4" />
                   </div>
-                  <p className="text-xs text-slate-500 truncate">
-                    {row.source === 'field'
-                      ? `${(row as FieldExpense).kilometres} km • ${(row as FieldExpense).description || 'Conveyance'}`
-                      : `${(row as EmployeeExpense).category === 'other' ? (row as EmployeeExpense).custom_category : (row as EmployeeExpense).category} • ${(row as EmployeeExpense).description}`}
-                  </p>
-                  <p className="text-[11px] text-slate-400">{format(parseISO(row.expense_date), 'dd MMM yyyy')} • {row.source === 'field' ? 'Field/Conveyance' : 'Employee Expense'}</p>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-slate-800 text-sm">{row.userName}</p>
+                      <StatusBadge status={row.status} />
+                    </div>
+                    <p className="text-xs text-slate-500 truncate">
+                      {row.source === 'field'
+                        ? `${(row as FieldExpense).kilometres} km • ${(row as FieldExpense).description || 'Conveyance'}`
+                        : `${(row as EmployeeExpense).category === 'other' ? (row as EmployeeExpense).custom_category : (row as EmployeeExpense).category} • ${(row as EmployeeExpense).description}`}
+                    </p>
+                    <p className="text-[11px] text-slate-400">{format(parseISO(row.expense_date), 'dd MMM yyyy')} • {row.source === 'field' ? 'Field/Conveyance' : 'Employee Expense'}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0 justify-end">
+                  {/* Separate DR / CR display — never combined */}
+                  <div className="flex items-center gap-2">
+                    <div className="text-right">
+                      <p className="text-[9px] text-red-500 font-semibold uppercase leading-tight">DR</p>
+                      <p className="text-sm font-bold text-red-600 leading-tight">₹{dr.toLocaleString('en-IN')}</p>
+                    </div>
+                    {cr > 0 && (
+                      <div className="text-right">
+                        <p className="text-[9px] text-green-600 font-semibold uppercase leading-tight">CR</p>
+                        <p className="text-sm font-bold text-green-600 leading-tight">₹{cr.toLocaleString('en-IN')}</p>
+                      </div>
+                    )}
+                  </div>
+                  {row.status === 'pending' && (
+                    <>
+                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-green-600 hover:bg-green-50" onClick={() => approve(row)} title="Approve">
+                        <Check className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-red-500 hover:bg-red-50" onClick={() => setRejectTarget(row)} title="Reject">
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </>
+                  )}
+                  <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-500 hover:bg-slate-100" onClick={() => openEdit(row)} title="Edit">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-red-400 hover:bg-red-50" onClick={() => setDeleteTarget(row)} title="Delete">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0 justify-end">
-                <span className="font-bold text-sm text-slate-800">₹{totalAmount(row).toLocaleString('en-IN')}</span>
-                {row.status === 'pending' && (
-                  <>
-                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-green-600 hover:bg-green-50" onClick={() => approve(row)} title="Approve">
-                      <Check className="h-4 w-4" />
-                    </Button>
-                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-red-500 hover:bg-red-50" onClick={() => setRejectTarget(row)} title="Reject">
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </>
-                )}
-                <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-red-400 hover:bg-red-50" onClick={() => setDeleteTarget(row)} title="Delete">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -456,7 +619,7 @@ const FieldExpensesPage: React.FC = () => {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add Field Expense</DialogTitle>
-            <DialogDescription>Manually log a conveyance entry (auto-approved).</DialogDescription>
+            <DialogDescription>Manually log a conveyance entry (auto-approved). Conveyance = company spend (DR). Credit = collected from customer (CR).</DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
             <div>
@@ -478,11 +641,11 @@ const FieldExpensesPage: React.FC = () => {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-medium text-slate-600">Conveyance Amount (₹)</label>
+                <label className="text-xs font-medium text-red-500">Conveyance (DR) ₹</label>
                 <Input type="number" value={addForm.conveyance_amount} onChange={(e) => setAddForm({ ...addForm, conveyance_amount: e.target.value })} placeholder="0" />
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-600">Credit / Extra (₹)</label>
+                <label className="text-xs font-medium text-green-600">Credit Collected (CR) ₹</label>
                 <Input type="number" value={addForm.credit_total} onChange={(e) => setAddForm({ ...addForm, credit_total: e.target.value })} placeholder="0" />
               </div>
             </div>
@@ -494,6 +657,69 @@ const FieldExpensesPage: React.FC = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
             <Button onClick={saveFieldAdd} disabled={saving} className="bg-orange-500 hover:bg-orange-600">{saving ? 'Saving...' : 'Add & Approve'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Modal */}
+      <Dialog open={!!editTarget} onOpenChange={(open) => !open && setEditTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit {editTarget?.source === 'field' ? 'Field Expense' : 'Employee Expense'}</DialogTitle>
+            <DialogDescription>Update the entry for {editTarget?.userName}.</DialogDescription>
+          </DialogHeader>
+          {editTarget?.source === 'field' ? (
+            <div className="space-y-3 py-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-600">Date</label>
+                  <Input type="date" value={editForm.expense_date || ''} onChange={(e) => setEditForm({ ...editForm, expense_date: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-600">Kilometres</label>
+                  <Input type="number" value={editForm.kilometres || ''} onChange={(e) => setEditForm({ ...editForm, kilometres: e.target.value })} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-red-500">Conveyance (DR) ₹</label>
+                  <Input type="number" value={editForm.conveyance_amount || ''} onChange={(e) => setEditForm({ ...editForm, conveyance_amount: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-green-600">Credit Collected (CR) ₹</label>
+                  <Input type="number" value={editForm.credit_total || ''} onChange={(e) => setEditForm({ ...editForm, credit_total: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600">Description</label>
+                <Input value={editForm.description || ''} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3 py-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-600">Date</label>
+                  <Input type="date" value={editForm.expense_date || ''} onChange={(e) => setEditForm({ ...editForm, expense_date: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-600">Amount ₹</label>
+                  <Input type="number" value={editForm.amount || ''} onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600">Category</label>
+                <Input value={editForm.category || ''} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600">Description</label>
+                <Input value={editForm.description || ''} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditTarget(null)}>Cancel</Button>
+            <Button onClick={saveEdit} disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -521,7 +747,10 @@ const FieldExpensesPage: React.FC = () => {
             {bulkRows.length > 0 && (
               <div className="bg-green-50 border border-green-100 rounded-lg p-3">
                 <p className="text-sm font-semibold text-green-700">{bulkRows.length} valid rows ready to upload</p>
-                <p className="text-xs text-green-600">Total: ₹{bulkRows.reduce((s, r) => s + r.conveyance_amount + r.credit_total, 0).toLocaleString('en-IN')}</p>
+                <p className="text-xs text-green-600">
+                  DR: ₹{bulkRows.reduce((s, r) => s + r.conveyance_amount, 0).toLocaleString('en-IN')} •
+                  CR: ₹{bulkRows.reduce((s, r) => s + r.credit_total, 0).toLocaleString('en-IN')}
+                </p>
               </div>
             )}
           </div>
@@ -553,7 +782,7 @@ const FieldExpensesPage: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirm */}
+      {/* Single Delete Confirm */}
       <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent>
           <DialogHeader>
@@ -563,6 +792,22 @@ const FieldExpensesPage: React.FC = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
             <Button className="bg-red-600 hover:bg-red-700" onClick={handleDelete}>Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delete Confirm */}
+      <Dialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600"><AlertTriangle className="h-5 w-5" /> Delete {selectedKeys.size} Entries</DialogTitle>
+            <DialogDescription>Are you sure you want to permanently delete these {selectedKeys.size} selected entries? This cannot be undone.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkDeleteOpen(false)}>Cancel</Button>
+            <Button className="bg-red-600 hover:bg-red-700" onClick={handleBulkDelete} disabled={bulkDeleting}>
+              {bulkDeleting ? 'Deleting...' : `Delete ${selectedKeys.size} Entries`}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
