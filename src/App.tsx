@@ -12,6 +12,8 @@ import ReportsPage from './pages/Admin/ReportsPage';
 import BackupPage from './pages/Admin/BackupPage';
 import StoreExpensesPage from './pages/Admin/StoreExpensesPage';
 import FieldExpensesPage from './pages/Admin/FieldExpensesPage';
+import LedgerPage from './pages/Admin/LedgerPage';
+import BudgetPage from './pages/Admin/BudgetPage';
 import EmployeeLeadsPage from './pages/Employee/EmployeeLeadsPage';
 import EmployeeExpensesPage from './pages/Employee/EmployeeExpensesPage';
 import AnnouncementsPage from './pages/AnnouncementsPage';
@@ -116,6 +118,8 @@ function App() {
               <Route path="backup"     element={<BackupPage />} />
               <Route path="expenses/store" element={<StoreExpensesPage />} />
               <Route path="expenses/field" element={<FieldExpensesPage />} />
+              <Route path="expenses/ledger" element={<LedgerPage />} />
+              <Route path="expenses/budget" element={<BudgetPage />} />
               <Route path="expenses" element={<StoreExpensesPage />} />
             </Route>
 
