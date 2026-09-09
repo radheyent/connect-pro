@@ -11,11 +11,12 @@ import {
 } from '@/components/ui/select';
 import {
   Plus, TrendingDown, TrendingUp, Wallet, Pencil, Trash2, AlertTriangle,
-  ChevronLeft, ChevronRight, Store
+  ChevronLeft, ChevronRight, Store, Upload, Download, FileSpreadsheet, X
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format, parseISO } from 'date-fns';
+import * as XLSX from 'xlsx';
 
 interface OfficeExpense {
   id: string;
@@ -66,6 +67,12 @@ const StoreExpensesPage: React.FC = () => {
 
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ kind: 'expense' | 'credit'; id: string; label: string } | null>(null);
+
+  // Bulk upload (office expenses only)
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkRows, setBulkRows] = useState<any[]>([]);
+  const [bulkErrors, setBulkErrors] = useState<string[]>([]);
+  const [bulkUploading, setBulkUploading] = useState(false);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -188,6 +195,77 @@ const StoreExpensesPage: React.FC = () => {
     } catch (e: any) { toast.error(e.message); }
   };
 
+  // ── Bulk Upload (Office Expenses) ───────────────────────────────────
+  const downloadSample = () => {
+    const sampleRows = [
+      { 'Date (YYYY-MM-DD)': format(new Date(), 'yyyy-MM-dd'), Category: 'Refreshment', 'Spent By Name': 'Ram', Description: 'Tea for office', Remarks: '', Amount: 45 },
+      { 'Date (YYYY-MM-DD)': format(new Date(), 'yyyy-MM-dd'), Category: 'Recharge', 'Spent By Name': 'Vishnu', Description: 'Recharge for customer', Remarks: '', Amount: 199 },
+    ];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(sampleRows);
+    ws['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 30 }, { wch: 20 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, ws, 'Expenses');
+    XLSX.writeFile(wb, 'StoreExpense_Sample.xlsx');
+  };
+
+  const handleBulkFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBulkRows([]);
+    setBulkErrors([]);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb = XLSX.read(ev.target?.result, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const raw: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        const errors: string[] = [];
+        const parsed: any[] = [];
+        raw.forEach((row, i) => {
+          const rowNum = i + 2;
+          const date = String(row['Date (YYYY-MM-DD)'] || '').trim();
+          const category = String(row['Category'] || '').trim();
+          const spentBy = String(row['Spent By Name'] || '').trim();
+          const desc = String(row['Description'] || '').trim();
+          const remarks = String(row['Remarks'] || '').trim();
+          const amount = parseFloat(String(row['Amount'] || '').replace(/[^0-9.]/g, ''));
+          const rowErrors: string[] = [];
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) rowErrors.push('invalid date');
+          if (!category) rowErrors.push('category empty');
+          if (!desc) rowErrors.push('description empty');
+          if (isNaN(amount) || amount <= 0) rowErrors.push('invalid amount');
+          if (rowErrors.length) errors.push(`Row ${rowNum}: ${rowErrors.join(', ')}`);
+          else parsed.push({ expense_date: date, category, spent_by_name: spentBy || null, description: desc, remarks: remarks || null, amount });
+        });
+        setBulkErrors(errors);
+        setBulkRows(parsed);
+      } catch (err: any) {
+        setBulkErrors([`File read error: ${err.message}`]);
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
+
+  const handleBulkUpload = async () => {
+    if (!bulkRows.length) return;
+    setBulkUploading(true);
+    try {
+      const payload = bulkRows.map(r => ({ ...r, added_by: user!.id, updated_at: new Date().toISOString() }));
+      const { error } = await supabase.from('office_expenses').insert(payload);
+      if (error) throw error;
+      toast.success(`${payload.length} expenses uploaded`);
+      setBulkOpen(false);
+      setBulkRows([]);
+      setBulkErrors([]);
+      fetchAll();
+    } catch (e: any) {
+      toast.error('Upload failed: ' + e.message);
+    } finally {
+      setBulkUploading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -200,7 +278,10 @@ const StoreExpensesPage: React.FC = () => {
             <p className="text-sm text-slate-500">Office costs & money coming in — by month</p>
           </div>
         </div>
-        <div className="flex gap-2 w-full sm:w-auto">
+        <div className="flex gap-2 w-full sm:w-auto flex-wrap">
+          <Button variant="outline" onClick={() => setBulkOpen(true)} className="flex-1 sm:flex-none">
+            <Upload className="h-4 w-4 mr-1" /> Bulk Upload
+          </Button>
           <Button variant="outline" onClick={openAddCredit} className="flex-1 sm:flex-none border-green-200 text-green-700 hover:bg-green-50">
             <Plus className="h-4 w-4 mr-1" /> Credit
           </Button>
@@ -376,6 +457,41 @@ const StoreExpensesPage: React.FC = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreditOpen(false)}>Cancel</Button>
             <Button onClick={saveCredit} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bulkOpen} onOpenChange={(open) => { setBulkOpen(open); if (!open) { setBulkRows([]); setBulkErrors([]); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><FileSpreadsheet className="h-5 w-5" /> Bulk Upload Expenses</DialogTitle>
+            <DialogDescription>Excel file se ek saath kai office expenses upload karo.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Button variant="outline" size="sm" onClick={downloadSample} className="w-full">
+              <Download className="h-4 w-4 mr-1" /> Download Sample Excel
+            </Button>
+            <div className="border-2 border-dashed border-slate-200 rounded-lg p-4 text-center">
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleBulkFilePick} className="text-sm" />
+            </div>
+            {bulkErrors.length > 0 && (
+              <div className="bg-red-50 border border-red-100 rounded-lg p-3 max-h-32 overflow-y-auto">
+                <p className="text-xs font-semibold text-red-600 mb-1">{bulkErrors.length} row(s) me error:</p>
+                {bulkErrors.map((err, i) => <p key={i} className="text-[11px] text-red-500">{err}</p>)}
+              </div>
+            )}
+            {bulkRows.length > 0 && (
+              <div className="bg-green-50 border border-green-100 rounded-lg p-3">
+                <p className="text-sm font-semibold text-green-700">{bulkRows.length} valid rows ready to upload</p>
+                <p className="text-xs text-green-600">Total: ₹{bulkRows.reduce((s, r) => s + r.amount, 0).toLocaleString('en-IN')}</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkOpen(false)}>Cancel</Button>
+            <Button onClick={handleBulkUpload} disabled={!bulkRows.length || bulkUploading}>
+              {bulkUploading ? 'Uploading...' : `Upload ${bulkRows.length || ''} Rows`}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
