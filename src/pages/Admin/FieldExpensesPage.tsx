@@ -11,11 +11,12 @@ import {
 } from '@/components/ui/select';
 import {
   Plus, Check, X, Clock, MapPin, User, ChevronLeft, ChevronRight,
-  Truck, AlertTriangle, Trash2, Pencil
+  Truck, AlertTriangle, Trash2, Pencil, Upload, Download, FileSpreadsheet
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format, parseISO } from 'date-fns';
+import * as XLSX from 'xlsx';
 
 interface FieldExpense {
   id: string;
@@ -62,7 +63,14 @@ const FieldExpensesPage: React.FC = () => {
   const [rejectComment, setRejectComment] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<CombinedRow | null>(null);
 
+  // Bulk upload (field expenses)
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkRows, setBulkRows] = useState<any[]>([]);
+  const [bulkErrors, setBulkErrors] = useState<string[]>([]);
+  const [bulkUploading, setBulkUploading] = useState(false);
+
   const userMap = useMemo(() => Object.fromEntries(users.map(u => [u.id, u.name])), [users]);
+  const nameToIdMap = useMemo(() => Object.fromEntries(users.map(u => [u.name.trim().toLowerCase(), u.id])), [users]);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -189,6 +197,85 @@ const FieldExpensesPage: React.FC = () => {
     } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
   };
 
+  // ── Bulk Upload (Field Expenses) ────────────────────────────────────
+  const downloadSample = () => {
+    const empNames = users.map(u => u.name);
+    const sampleRows = [
+      { 'Date (YYYY-MM-DD)': format(new Date(), 'yyyy-MM-dd'), 'Employee Name': empNames[0] || 'Ram', Kilometres: 12, 'Conveyance Amount': 60, 'Credit/Extra': 0, Description: 'Field visit' },
+    ];
+    const infoRows = [
+      { '': 'EMPLOYEE NAME — must match exactly (case-insensitive):' },
+      ...empNames.map(n => ({ '': n })),
+    ];
+    const wb = XLSX.utils.book_new();
+    const ws1 = XLSX.utils.json_to_sheet(sampleRows);
+    ws1['!cols'] = [{ wch: 18 }, { wch: 18 }, { wch: 12 }, { wch: 18 }, { wch: 14 }, { wch: 25 }];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Field Expenses');
+    const ws2 = XLSX.utils.json_to_sheet(infoRows);
+    ws2['!cols'] = [{ wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Employee Names');
+    XLSX.writeFile(wb, 'FieldExpense_Sample.xlsx');
+  };
+
+  const handleBulkFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBulkRows([]);
+    setBulkErrors([]);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb = XLSX.read(ev.target?.result, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const raw: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        const errors: string[] = [];
+        const parsed: any[] = [];
+        raw.forEach((row, i) => {
+          const rowNum = i + 2;
+          const date = String(row['Date (YYYY-MM-DD)'] || '').trim();
+          const empName = String(row['Employee Name'] || '').trim();
+          const km = parseFloat(String(row['Kilometres'] || '0').replace(/[^0-9.]/g, '')) || 0;
+          const conveyance = parseFloat(String(row['Conveyance Amount'] || '').replace(/[^0-9.]/g, ''));
+          const credit = parseFloat(String(row['Credit/Extra'] || '0').replace(/[^0-9.]/g, '')) || 0;
+          const desc = String(row['Description'] || '').trim();
+          const empId = nameToIdMap[empName.toLowerCase()];
+
+          const rowErrors: string[] = [];
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) rowErrors.push('invalid date');
+          if (!empId) rowErrors.push(`employee "${empName}" not found`);
+          if (isNaN(conveyance) || conveyance <= 0) rowErrors.push('invalid conveyance amount');
+          if (rowErrors.length) errors.push(`Row ${rowNum}: ${rowErrors.join(', ')}`);
+          else parsed.push({ expense_date: date, field_boy_id: empId, kilometres: km, conveyance_amount: conveyance, credit_total: credit, description: desc || null });
+        });
+        setBulkErrors(errors);
+        setBulkRows(parsed);
+      } catch (err: any) {
+        setBulkErrors([`File read error: ${err.message}`]);
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
+
+  const handleBulkUpload = async () => {
+    if (!bulkRows.length) return;
+    setBulkUploading(true);
+    try {
+      const payload = bulkRows.map(r => ({ ...r, status: 'approved', approved_by: user!.id, approved_at: new Date().toISOString() }));
+      const { error } = await supabase.from('field_expenses').insert(payload);
+      if (error) throw error;
+      toast.success(`${payload.length} field expenses uploaded`);
+      setBulkOpen(false);
+      setBulkRows([]);
+      setBulkErrors([]);
+      fetchAll();
+    } catch (e: any) {
+      toast.error('Upload failed: ' + e.message);
+    } finally {
+      setBulkUploading(false);
+    }
+  };
+
   const StatusBadge = ({ status }: { status: string }) => (
     <span className={cn(
       "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase",
@@ -212,9 +299,14 @@ const FieldExpensesPage: React.FC = () => {
             <p className="text-sm text-slate-500">Conveyance & field team spends — by month</p>
           </div>
         </div>
-        <Button onClick={() => setAddOpen(true)} className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600">
-          <Plus className="h-4 w-4 mr-1" /> Add Field Expense
-        </Button>
+        <div className="flex gap-2 w-full sm:w-auto flex-wrap">
+          <Button variant="outline" onClick={() => setBulkOpen(true)} className="flex-1 sm:flex-none">
+            <Upload className="h-4 w-4 mr-1" /> Bulk Upload
+          </Button>
+          <Button onClick={() => setAddOpen(true)} className="flex-1 sm:flex-none bg-orange-500 hover:bg-orange-600">
+            <Plus className="h-4 w-4 mr-1" /> Add Field Expense
+          </Button>
+        </div>
       </div>
 
       <div className="flex items-center justify-center gap-3 bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
@@ -253,40 +345,40 @@ const FieldExpensesPage: React.FC = () => {
           <h3 className="text-sm font-semibold text-slate-700">Employee-wise Total — {format(parseISO(month + '-01'), 'MMMM yyyy')}</h3>
           <p className="text-[11px] text-slate-400 mt-0.5">Approved amounts only</p>
         </div>
-        <div className="divide-y divide-slate-100">
+        <div className="divide-y divide-slate-100 md:divide-y-0 md:grid md:grid-cols-2 md:gap-px md:bg-slate-100">
           {userBreakdown.length === 0 ? (
-            <div className="p-6 text-center text-slate-400 text-sm">Is mahine ka koi approved data nahi hai</div>
+            <div className="p-6 text-center text-slate-400 text-sm md:col-span-2">Is mahine ka koi approved data nahi hai</div>
           ) : userBreakdown.map((u) => (
-            <div key={u.name} className="flex items-center justify-between gap-3 p-4">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="h-9 w-9 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-bold shrink-0">
+            <div key={u.name} className="flex items-center justify-between gap-2 p-2.5 bg-white">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="h-7 w-7 rounded-full bg-slate-800 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
                   {u.name.split(' ').map(n => n[0]).join('').toUpperCase()}
                 </div>
                 <div className="min-w-0">
-                  <p className="font-semibold text-slate-800 text-sm">{u.name}</p>
-                  <p className="text-[11px] text-slate-400">
-                    {u.fieldCount > 0 && `${u.fieldCount} field entr${u.fieldCount > 1 ? 'ies' : 'y'}`}
+                  <p className="font-semibold text-slate-800 text-xs truncate">{u.name}</p>
+                  <p className="text-[10px] text-slate-400 truncate">
+                    {u.fieldCount > 0 && `${u.fieldCount} field`}
                     {u.fieldCount > 0 && u.employeeCount > 0 && ' • '}
-                    {u.employeeCount > 0 && `${u.employeeCount} expense entr${u.employeeCount > 1 ? 'ies' : 'y'}`}
+                    {u.employeeCount > 0 && `${u.employeeCount} exp`}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-4 shrink-0 text-right">
+              <div className="flex items-center gap-2 shrink-0 text-right">
                 {u.fieldCount > 0 && (
                   <div>
-                    <p className="text-[10px] text-orange-500 font-semibold uppercase">Field</p>
-                    <p className="text-sm font-bold text-slate-700">₹{u.fieldTotal.toLocaleString('en-IN')}</p>
+                    <p className="text-[9px] text-orange-500 font-semibold uppercase leading-tight">Field</p>
+                    <p className="text-xs font-bold text-slate-700 leading-tight">₹{u.fieldTotal.toLocaleString('en-IN')}</p>
                   </div>
                 )}
                 {u.employeeCount > 0 && (
                   <div>
-                    <p className="text-[10px] text-blue-500 font-semibold uppercase">Expense</p>
-                    <p className="text-sm font-bold text-slate-700">₹{u.employeeTotal.toLocaleString('en-IN')}</p>
+                    <p className="text-[9px] text-blue-500 font-semibold uppercase leading-tight">Exp</p>
+                    <p className="text-xs font-bold text-slate-700 leading-tight">₹{u.employeeTotal.toLocaleString('en-IN')}</p>
                   </div>
                 )}
-                <div className="pl-3 border-l border-slate-200">
-                  <p className="text-[10px] text-slate-400 font-semibold uppercase">Total</p>
-                  <p className="text-base font-bold text-slate-900">₹{(u.fieldTotal + u.employeeTotal).toLocaleString('en-IN')}</p>
+                <div className="pl-2 border-l border-slate-200">
+                  <p className="text-[9px] text-slate-400 font-semibold uppercase leading-tight">Total</p>
+                  <p className="text-sm font-bold text-slate-900 leading-tight">₹{(u.fieldTotal + u.employeeTotal).toLocaleString('en-IN')}</p>
                 </div>
               </div>
             </div>
@@ -402,6 +494,42 @@ const FieldExpensesPage: React.FC = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
             <Button onClick={saveFieldAdd} disabled={saving} className="bg-orange-500 hover:bg-orange-600">{saving ? 'Saving...' : 'Add & Approve'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Upload Modal */}
+      <Dialog open={bulkOpen} onOpenChange={(open) => { setBulkOpen(open); if (!open) { setBulkRows([]); setBulkErrors([]); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><FileSpreadsheet className="h-5 w-5" /> Bulk Upload Field Expenses</DialogTitle>
+            <DialogDescription>Excel file se ek saath kai field expenses upload karo (auto-approved).</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Button variant="outline" size="sm" onClick={downloadSample} className="w-full">
+              <Download className="h-4 w-4 mr-1" /> Download Sample Excel
+            </Button>
+            <div className="border-2 border-dashed border-slate-200 rounded-lg p-4 text-center">
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleBulkFilePick} className="text-sm" />
+            </div>
+            {bulkErrors.length > 0 && (
+              <div className="bg-red-50 border border-red-100 rounded-lg p-3 max-h-32 overflow-y-auto">
+                <p className="text-xs font-semibold text-red-600 mb-1">{bulkErrors.length} row(s) me error:</p>
+                {bulkErrors.map((err, i) => <p key={i} className="text-[11px] text-red-500">{err}</p>)}
+              </div>
+            )}
+            {bulkRows.length > 0 && (
+              <div className="bg-green-50 border border-green-100 rounded-lg p-3">
+                <p className="text-sm font-semibold text-green-700">{bulkRows.length} valid rows ready to upload</p>
+                <p className="text-xs text-green-600">Total: ₹{bulkRows.reduce((s, r) => s + r.conveyance_amount + r.credit_total, 0).toLocaleString('en-IN')}</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkOpen(false)}>Cancel</Button>
+            <Button onClick={handleBulkUpload} disabled={!bulkRows.length || bulkUploading} className="bg-orange-500 hover:bg-orange-600">
+              {bulkUploading ? 'Uploading...' : `Upload ${bulkRows.length || ''} Rows`}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
