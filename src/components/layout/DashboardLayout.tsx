@@ -7,7 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import {
   LayoutDashboard, Users, Share2, PhoneMissed,
   BarChart3, Database, LogOut, Menu, Sun, Moon,
-  Bell, Wallet, Car, Receipt, ExternalLink, Truck
+  Bell, Wallet, Car, Receipt, ExternalLink, Truck, BookOpenText, IndianRupee, ChevronDown
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -23,6 +23,8 @@ const PAGE_TITLES: Record<string, string> = {
   '/admin/backup':            'Backup & Reset',
   '/admin/expenses/store':     'Store Expenses',
   '/admin/expenses/field':     'Field Expenses',
+  '/admin/expenses/ledger':    'Ledger',
+  '/admin/expenses/budget':    'Employee Spend Limit',
   '/employee':                'My Dashboard',
   '/employee/leads':          'My Leads',
   '/employee/expenses':       'My Expenses',
@@ -86,6 +88,8 @@ const DashboardLayout: React.FC = () => {
   }, [showActivity]);
 
   // ── Nav items per role ────────────────────────────────────────────────────
+  const [expandedMenu, setExpandedMenu] = React.useState<string | null>(null);
+
   const navItems = React.useMemo(() => {
     const role = profile?.role || '';
     const dashPath =
@@ -100,8 +104,12 @@ const DashboardLayout: React.FC = () => {
       { name: 'All Leads',      path: '/admin/leads',        icon: Share2,          roles: ['admin'] },
       { name: 'Fake Calls',     path: '/admin/fake-calls',   icon: PhoneMissed,     roles: ['admin'] },
       { name: 'Reports',        path: '/admin/reports',      icon: BarChart3,       roles: ['admin'] },
-      { name: 'Store Expenses', path: '/admin/expenses/store',  icon: Wallet,          roles: ['admin'] },
-      { name: 'Field Expenses', path: '/admin/expenses/field',  icon: Truck,           roles: ['admin'] },
+      { name: 'Expenses', path: '/admin/expenses', icon: Wallet, roles: ['admin'], children: [
+          { name: 'Store Expenses', path: '/admin/expenses/store', icon: Wallet },
+          { name: 'Field Expenses', path: '/admin/expenses/field', icon: Truck },
+          { name: 'Ledger',         path: '/admin/expenses/ledger', icon: BookOpenText },
+          { name: 'Spend Limit',    path: '/admin/expenses/budget', icon: IndianRupee },
+        ] },
       { name: 'Backup',         path: '/admin/backup',       icon: Database,        roles: ['admin'] },
       // ── Employee ──
       { name: 'My Leads',       path: '/employee/leads',     icon: Users,           roles: ['employee'] },
@@ -140,17 +148,63 @@ const DashboardLayout: React.FC = () => {
             const Icon     = item.icon;
             const isDash   = item.name === 'Dashboard';
             const isExternal = item.path === 'external';
-            const isActive = !isExternal && (isDash
+            const hasChildren = !!(item as any).children;
+            const childActive = hasChildren && (item as any).children.some((c: any) =>
+              location.pathname === c.path || location.pathname.startsWith(c.path + '/'));
+            const isActive = !isExternal && !hasChildren && (isDash
               ? location.pathname === item.path
               : location.pathname === item.path ||
                 location.pathname.startsWith(item.path + '/'));
 
             const linkClass = cn(
               'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm',
-              isActive
+              (isActive || childActive)
                 ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30'
                 : 'text-slate-400 hover:bg-slate-800 hover:text-white'
             );
+
+            if (hasChildren) {
+              const isOpen = expandedMenu === item.name || childActive;
+              return (
+                <div key={item.name}>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedMenu(isOpen ? null : item.name)}
+                    className={cn(linkClass, 'w-full justify-between')}
+                  >
+                    <span className="flex items-center gap-3">
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span className={cn(childActive && 'font-semibold')}>{item.name}</span>
+                    </span>
+                    <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', isOpen && 'rotate-180')} />
+                  </button>
+                  {isOpen && (
+                    <div className="mt-1 ml-4 pl-3 border-l border-slate-800 space-y-1">
+                      {(item as any).children.map((child: any) => {
+                        const ChildIcon = child.icon;
+                        const childIsActive = location.pathname === child.path || location.pathname.startsWith(child.path + '/');
+                        return (
+                          <Link
+                            key={child.path}
+                            to={child.path}
+                            onClick={onNavClick}
+                            className={cn(
+                              'flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] transition-all',
+                              childIsActive
+                                ? 'bg-blue-600/20 text-blue-400 font-semibold'
+                                : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                            )}
+                          >
+                            <ChildIcon className="h-3.5 w-3.5 shrink-0" />
+                            <span>{child.name}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            }
 
             return isExternal ? (
               <a
