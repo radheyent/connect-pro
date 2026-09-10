@@ -68,6 +68,11 @@ const StoreExpensesPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ kind: 'expense' | 'credit'; id: string; label: string } | null>(null);
 
+  // Bulk select
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
   // Bulk upload (office expenses only)
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkRows, setBulkRows] = useState<any[]>([]);
@@ -127,6 +132,20 @@ const StoreExpensesPage: React.FC = () => {
   const saveExpense = async () => {
     if (!expenseForm.amount || parseFloat(expenseForm.amount) <= 0) { toast.error('Amount daalo'); return; }
     if (!expenseForm.description.trim()) { toast.error('Description daalo'); return; }
+
+    // Duplicate guard: same date + same category + same amount already exists (skip check when editing that same entry)
+    const amt = parseFloat(expenseForm.amount);
+    const isDuplicate = expenses.some(e =>
+      e.id !== editExpenseId &&
+      e.expense_date === expenseForm.expense_date &&
+      e.category === expenseForm.category &&
+      Number(e.amount) === amt
+    );
+    if (isDuplicate) {
+      toast.error(`Ye entry pehle se maujood hai — ${expenseForm.category}, ₹${amt}, ${format(parseISO(expenseForm.expense_date), 'dd MMM yyyy')} ko. Dobara add nahi kiya.`);
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
@@ -195,6 +214,45 @@ const StoreExpensesPage: React.FC = () => {
     } catch (e: any) { toast.error(e.message); }
   };
 
+  const rowKey = (row: Row) => `${row.kind}-${row.id}`;
+  const allSelected = combinedRows.length > 0 && combinedRows.every(r => selectedKeys.has(rowKey(r)));
+  const toggleSelectAll = () => {
+    if (allSelected) setSelectedKeys(new Set());
+    else setSelectedKeys(new Set(combinedRows.map(rowKey)));
+  };
+  const toggleSelectOne = (row: Row) => {
+    setSelectedKeys(prev => {
+      const next = new Set(prev);
+      const k = rowKey(row);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    setBulkDeleting(true);
+    try {
+      const expenseIds = combinedRows.filter(r => r.kind === 'expense' && selectedKeys.has(rowKey(r))).map(r => r.id);
+      const creditIds = combinedRows.filter(r => r.kind === 'credit' && selectedKeys.has(rowKey(r))).map(r => r.id);
+      if (expenseIds.length) {
+        const { error } = await supabase.from('office_expenses').delete().in('id', expenseIds);
+        if (error) throw error;
+      }
+      if (creditIds.length) {
+        const { error } = await supabase.from('admin_credits').delete().in('id', creditIds);
+        if (error) throw error;
+      }
+      toast.success(`${selectedKeys.size} entries deleted`);
+      setSelectedKeys(new Set());
+      setBulkDeleteOpen(false);
+      fetchAll();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   // ── Bulk Upload (Office Expenses) ───────────────────────────────────
   const downloadSample = () => {
     const sampleRows = [
@@ -221,6 +279,7 @@ const StoreExpensesPage: React.FC = () => {
         const raw: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
         const errors: string[] = [];
         const parsed: any[] = [];
+        const seenInFile = new Set<string>(); // date|category|amount — dedupe within the uploaded file itself
         raw.forEach((row, i) => {
           const rowNum = i + 2;
           const date = String(row['Date (YYYY-MM-DD)'] || '').trim();
@@ -234,6 +293,15 @@ const StoreExpensesPage: React.FC = () => {
           if (!category) rowErrors.push('category empty');
           if (!desc) rowErrors.push('description empty');
           if (isNaN(amount) || amount <= 0) rowErrors.push('invalid amount');
+
+          if (!rowErrors.length) {
+            const dupKey = `${date}|${category}|${amount}`;
+            const existsInDb = expenses.some(e => e.expense_date === date && e.category === category && Number(e.amount) === amount);
+            if (existsInDb) rowErrors.push('duplicate — already exists in system');
+            else if (seenInFile.has(dupKey)) rowErrors.push('duplicate — repeated in this file');
+            else seenInFile.add(dupKey);
+          }
+
           if (rowErrors.length) errors.push(`Row ${rowNum}: ${rowErrors.join(', ')}`);
           else parsed.push({ expense_date: date, category, spent_by_name: spentBy || null, description: desc, remarks: remarks || null, amount });
         });
@@ -291,12 +359,17 @@ const StoreExpensesPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex items-center justify-center gap-3 bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
+      <div className="flex items-center justify-center gap-3 bg-white border border-slate-200 rounded-xl p-3 shadow-sm relative">
         <Button variant="ghost" size="sm" onClick={() => shiftMonth(-1)}><ChevronLeft className="h-4 w-4" /></Button>
         <span className="font-semibold text-slate-800 w-36 text-center">
           {format(parseISO(month + '-01'), 'MMMM yyyy')}
         </span>
         <Button variant="ghost" size="sm" onClick={() => shiftMonth(1)}><ChevronRight className="h-4 w-4" /></Button>
+        {selectedKeys.size > 0 && (
+          <Button variant="outline" size="sm" className="absolute right-3 text-red-600 border-red-200 hover:bg-red-50" onClick={() => setBulkDeleteOpen(true)}>
+            <Trash2 className="h-4 w-4 mr-1" /> Delete {selectedKeys.size} Selected
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -324,8 +397,14 @@ const StoreExpensesPage: React.FC = () => {
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-slate-700">Transactions — {format(parseISO(month + '-01'), 'MMMM yyyy')}</h3>
+          {combinedRows.length > 0 && (
+            <label className="flex items-center gap-2 text-xs text-slate-500 font-medium cursor-pointer">
+              <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="h-4 w-4 rounded border-slate-300" />
+              Select all
+            </label>
+          )}
         </div>
         <div className="divide-y divide-slate-100">
           {loading ? (
@@ -338,8 +417,14 @@ const StoreExpensesPage: React.FC = () => {
             const amount = row.amount;
             const label = isExpense ? row.category : (row.category === 'other' ? (row.custom_category || 'Other') : CREDIT_CATEGORIES.find(c => c.value === row.category)?.label || row.category);
             return (
-              <div key={`${row.kind}-${row.id}`} className="flex items-center justify-between gap-3 p-4 hover:bg-slate-50">
+              <div key={rowKey(row)} className="flex items-center justify-between gap-3 p-4 hover:bg-slate-50">
                 <div className="flex items-center gap-3 min-w-0">
+                  <input
+                    type="checkbox"
+                    checked={selectedKeys.has(rowKey(row))}
+                    onChange={() => toggleSelectOne(row)}
+                    className="h-4 w-4 rounded border-slate-300 shrink-0"
+                  />
                   <div className={cn("h-9 w-9 rounded-full flex items-center justify-center shrink-0", isExpense ? "bg-red-50 text-red-500" : "bg-green-50 text-green-600")}>
                     {isExpense ? <TrendingDown className="h-4 w-4" /> : <TrendingUp className="h-4 w-4" />}
                   </div>
@@ -505,6 +590,21 @@ const StoreExpensesPage: React.FC = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
             <Button className="bg-red-600 hover:bg-red-700" onClick={handleDelete}>Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600"><AlertTriangle className="h-5 w-5" /> Delete {selectedKeys.size} Entries</DialogTitle>
+            <DialogDescription>Are you sure you want to permanently delete these {selectedKeys.size} selected entries? This cannot be undone.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkDeleteOpen(false)}>Cancel</Button>
+            <Button className="bg-red-600 hover:bg-red-700" onClick={handleBulkDelete} disabled={bulkDeleting}>
+              {bulkDeleting ? 'Deleting...' : `Delete ${selectedKeys.size} Entries`}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
