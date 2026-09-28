@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { X, Star, Zap, Trophy } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { showNativeNotification } from '@/lib/pushNotifications';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -105,6 +106,12 @@ const CACHE_TTL = 30_000; // 30 seconds
 // keep re-triggering the notification and draining battery.
 const notifiedSaleIds = new Set<string>();
 const notifiedAnnouncementIds = new Set<string>();
+
+// Tapping a sale notification opens the leads page and replays the celebration overlay.
+const saleNotificationUrl = (role: string | undefined, leadId: string, empName: string, leadName: string) => {
+  const base = role === 'admin' ? '/admin/leads' : role === 'field_boy' ? '/field-boy' : '/employee/leads';
+  return `${base}?celebrate=${encodeURIComponent(leadId)}&emp=${encodeURIComponent(empName)}&lead=${encodeURIComponent(leadName)}`;
+};
 
 export const RecentActivityPanel: React.FC = () => {
   const { user, profile } = useAuth();
@@ -214,7 +221,7 @@ export const RecentActivityPanel: React.FC = () => {
           activityCacheTime = 0; load();
           if (p.new?.assigned_to === user.id && !notifiedSaleIds.has(p.new.id)) {
             notifiedSaleIds.add(p.new.id);
-            const destUrl = profile.role === 'admin' ? '/admin/leads' : '/employee/leads';
+            const destUrl = saleNotificationUrl(profile.role, p.new.id, profile.name, p.new?.name || 'a lead');
             showNativeNotification('🏆 Sale Closed!', `Well done ${profile.name}! You closed "${p.new?.name || 'a lead'}"`, { url: destUrl, tag: `sale-${p.new?.id}` });
           }
         }
@@ -281,6 +288,29 @@ const CelebrationSystem: React.FC = () => {
   const seenIds = useRef<Set<string>>(new Set());
 
   const handleClose = useCallback(() => setCelebration(null), []);
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Notification tap (app was closed) → URL carries ?celebrate=… → show the overlay, then clean the URL
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const uid = params.get('celebrate');
+    if (!uid) return;
+    setCelebration({ uid, employeeName: params.get('emp') || 'Someone', leadName: params.get('lead') || 'a lead' });
+    params.delete('celebrate'); params.delete('emp'); params.delete('lead');
+    const qs = params.toString();
+    navigate({ pathname: location.pathname, search: qs ? `?${qs}` : '' }, { replace: true });
+  }, [location.search]); // eslint-disable-line
+
+  // Notification tap (app already open) → service worker posts the target URL
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type === 'NOTIFICATION_CLICK' && e.data.url) navigate(e.data.url);
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [navigate]);
 
   useEffect(() => {
     if (!profile || profile.role === 'admin') return;
@@ -303,7 +333,7 @@ const CelebrationSystem: React.FC = () => {
           }
           setCelebration({ uid: newLead.id, employeeName: empName, leadName: newLead.name });
           if (newLead.assigned_to !== profile.id) {
-            const destUrl = profile.role === 'admin' ? '/admin/leads' : '/employee/leads';
+            const destUrl = saleNotificationUrl(profile.role, newLead.id, empName, newLead.name);
             showNativeNotification('🏆 Team Update', `${empName} closed a sale: "${newLead.name}"`, { url: destUrl, tag: `team-sale-${newLead.id}` });
           }
         }
