@@ -41,29 +41,25 @@ self.addEventListener('push', e => {
   e.waitUntil(self.registration.showNotification(title, options));
 });
 
-// Notification click: focus existing tab or open a new one
+// Notification click: if the app is already open, focus it and tell it where to go
+// (postMessage is more reliable than client.navigate on installed PWAs); otherwise open it.
 self.addEventListener('notificationclick', e => {
   e.notification.close();
   const rawUrl = (e.notification.data && e.notification.data.url) || '/';
   const destUrl = new URL(rawUrl, self.location.origin).href;
 
-  e.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async clientsArr => {
-      const existing = clientsArr.find(c => c.url.startsWith(self.location.origin));
-      if (existing) {
-        try {
-          await existing.focus();
-          if ('navigate' in existing) {
-            await existing.navigate(destUrl);
-            return;
-          }
-        } catch (err) {
-          // navigate not supported/failed — fall through to opening a new window
-        }
-      }
-      return self.clients.openWindow(destUrl);
-    })
-  );
+  e.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const existing = all.find(c => new URL(c.url).origin === self.location.origin);
+    if (existing) {
+      try {
+        await existing.focus();
+        existing.postMessage({ type: 'NOTIFICATION_CLICK', url: rawUrl });
+        return;
+      } catch (err) { /* fall through to opening a new window */ }
+    }
+    return self.clients.openWindow(destUrl);
+  })());
 });
 
 // Fetch: network first, fallback to cache
