@@ -7,7 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import {
   LayoutDashboard, Users, Share2, PhoneMissed,
   BarChart3, Database, LogOut, Menu, Sun, Moon,
-  Bell, Wallet, Car, Receipt, ExternalLink, Truck, BookOpenText, IndianRupee, ChevronDown
+  Bell, Wallet, Car, Receipt, ExternalLink, Truck, BookOpenText, IndianRupee, ChevronDown, CalendarClock
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -18,6 +18,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/admin':                   'Dashboard',
   '/admin/employees':         'Employee Management',
   '/admin/leads':             'Lead Management',
+  '/admin/followups':         'Follow-ups',
   '/admin/fake-calls':        'Fake Calls',
   '/admin/reports':           'Reports',
   '/admin/backup':            'Backup & Reset',
@@ -102,6 +103,7 @@ const DashboardLayout: React.FC = () => {
       { name: 'Dashboard',      path: dashPath,              icon: LayoutDashboard, roles: ['admin','employee','field_boy'] },
       { name: 'Employees',      path: '/admin/employees',    icon: Users,           roles: ['admin'] },
       { name: 'All Leads',      path: '/admin/leads',        icon: Share2,          roles: ['admin'] },
+      { name: 'Follow-ups',     path: '/admin/followups',    icon: CalendarClock,   roles: ['admin'] },
       { name: 'Fake Calls',     path: '/admin/fake-calls',   icon: PhoneMissed,     roles: ['admin'] },
       { name: 'Reports',        path: '/admin/reports',      icon: BarChart3,       roles: ['admin'] },
       { name: 'Expenses', path: '/admin/expenses', icon: Wallet, roles: ['admin'], children: [
