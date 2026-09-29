@@ -113,6 +113,9 @@ const LeadManagement: React.FC = () => {
   const [activeLead,       setActiveLead]       = useState<any>(null);
   const [editStatus,       setEditStatus]       = useState('');
   const [editAssigneeId,   setEditAssigneeId]   = useState('');
+  const [editFollowUpDate, setEditFollowUpDate] = useState('');
+  const [editFollowUpTime, setEditFollowUpTime] = useState('');
+  const [editNotes,        setEditNotes]        = useState('');
   const [assigneeId,       setAssigneeId]       = useState('');
   const [deleteSingleLead, setDeleteSingleLead] = useState<any>(null);
   const [bulkDeleteType,   setBulkDeleteType]   = useState<'selection'|'filter'>('selection');
@@ -209,6 +212,9 @@ const LeadManagement: React.FC = () => {
     setActiveLead(lead);
     setEditStatus(lead.status || 'Fresh');
     setEditAssigneeId(lead.assigned_to || '');
+    setEditFollowUpDate(lead.follow_up_date || '');
+    setEditFollowUpTime(lead.follow_up_time || '');
+    setEditNotes(lead.notes || '');
     setIsEditOpen(true);
   }, []);
 
@@ -219,10 +225,14 @@ const LeadManagement: React.FC = () => {
 
   const handleUpdateLead = async () => {
     if (!activeLead) return;
+    if (editStatus === 'Follow-up' && !editFollowUpDate) { toast.error('Follow-up date zaroori hai'); return; }
     try {
       const { error } = await supabase.from('leads').update({
         status: editStatus,
         assigned_to: editAssigneeId === '_unassigned' || !editAssigneeId ? null : editAssigneeId,
+        notes: editNotes.trim() || null,
+        follow_up_date: editStatus === 'Follow-up' ? (editFollowUpDate || null) : null,
+        follow_up_time: editStatus === 'Follow-up' ? (editFollowUpTime || null) : null,
       }).eq('id', activeLead.id);
       if (error) throw error;
       toast.success('Lead updated');
@@ -597,6 +607,35 @@ const LeadManagement: React.FC = () => {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>{ALL_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
               </Select></div>
+
+            {editStatus === 'Follow-up' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs font-medium text-slate-600 mb-1 block">Follow-up Date</label>
+                  <Input type="date" value={editFollowUpDate}
+                    onChange={e => setEditFollowUpDate(e.target.value)}
+                    min={new Date().toISOString().split('T')[0]} /></div>
+                <div><label className="text-xs font-medium text-slate-600 mb-1 block">Follow-up Time</label>
+                  <Select value={editFollowUpTime} onValueChange={setEditFollowUpTime}>
+                    <SelectTrigger><SelectValue placeholder="Select Time" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Morning">Morning</SelectItem>
+                      <SelectItem value="Afternoon">Afternoon</SelectItem>
+                      <SelectItem value="Lunch-2nd Half">Lunch-2nd Half</SelectItem>
+                      <SelectItem value="Evening">Evening</SelectItem>
+                    </SelectContent>
+                  </Select></div>
+              </div>
+            )}
+
+            <div><label className="text-xs font-medium text-slate-600 mb-1 block">Notes</label>
+              <textarea
+                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                rows={3}
+                value={editNotes}
+                onChange={e => setEditNotes(e.target.value)}
+                placeholder="Notes likho..."
+              /></div>
+
             <div><label className="text-xs font-medium text-slate-600 mb-1 block">Assigned To</label>
               <Select value={editAssigneeId || '_unassigned'} onValueChange={setEditAssigneeId}>
                 <SelectTrigger><SelectValue /></SelectTrigger>

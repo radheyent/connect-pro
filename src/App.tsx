@@ -7,6 +7,7 @@ import EmployeeDashboard from './pages/Employee/EmployeeDashboard';
 import FieldBoyDashboard from './pages/FieldBoy/FieldBoyDashboard';
 import EmployeeManagement from './pages/Admin/EmployeeManagement';
 import LeadManagement from './pages/Admin/LeadManagement';
+import FollowUpsPage from './pages/Admin/FollowUpsPage';
 import FakeCallsPanel from './pages/Admin/FakeCallsPanel';
 import ReportsPage from './pages/Admin/ReportsPage';
 import BackupPage from './pages/Admin/BackupPage';
@@ -113,6 +114,7 @@ function App() {
               <Route index              element={<AdminDashboard />} />
               <Route path="employees"  element={<EmployeeManagement />} />
               <Route path="leads"      element={<LeadManagement />} />
+              <Route path="followups"  element={<FollowUpsPage />} />
               <Route path="fake-calls" element={<FakeCallsPanel />} />
               <Route path="reports"    element={<ReportsPage />} />
               <Route path="backup"     element={<BackupPage />} />
