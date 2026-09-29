@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Upload, Download, Search, UserPlus, Trash2, Edit, Info, Clock, X, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Upload, Download, Search, UserPlus, Trash2, Edit, Info, Clock, X, AlertTriangle, ChevronLeft, ChevronRight, ClipboardPaste, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -88,6 +88,164 @@ const AddLeadForm: React.FC<{ employees: any[]; onClose: () => void; onSuccess: 
   );
 };
 
+// ── Paste Leads (copy-paste bulk entry) ──────────────────────────────────────
+// Format, 5 lines per lead, no blank line needed between records:
+//   Line 1: Customer Name
+//   Line 2: Customer Mobile Number
+//   Line 3: Operator MatchingNumber   (e.g. "Jio 9012345678")
+//   Line 4: Notes
+//   Line 5: Employee Name to assign (must match an existing employee name)
+interface DraftLead {
+  name: string; phone: string; current_operator: string; matching_number: string;
+  notes: string; assigned_to: string; matched: boolean;
+}
+
+const parsePasteBlock = (text: string, employees: any[]): { drafts: DraftLead[]; leftover: number } => {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const drafts: DraftLead[] = [];
+  let i = 0;
+  for (; i + 5 <= lines.length; i += 5) {
+    const [nameLine, phoneLine, opLine, notesLine, empLine] = lines.slice(i, i + 5);
+    const phone = phoneLine.replace(/\D/g, '');
+    const opMatch = opLine.match(/^([A-Za-z]+)\s+(\d{6,})$/);
+    const operator = opMatch ? opMatch[1] : opLine;
+    const matchingNumber = opMatch ? opMatch[2] : '';
+    const emp = employees.find(e => e.name?.trim().toLowerCase() === empLine.trim().toLowerCase());
+    drafts.push({
+      name: nameLine, phone, current_operator: operator, matching_number: matchingNumber,
+      notes: notesLine, assigned_to: emp?.id || '', matched: !!emp,
+    });
+  }
+  return { drafts, leftover: lines.length - i };
+};
+
+const PasteLeadsFlow: React.FC<{ employees: any[]; onClose: () => void; onSuccess: () => void }> = ({ employees, onClose, onSuccess }) => {
+  const [step, setStep] = useState<'paste' | 'review'>('paste');
+  const [rawText, setRawText] = useState('');
+  const [drafts, setDrafts] = useState<DraftLead[]>([]);
+  const [leftover, setLeftover] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleParse = () => {
+    if (!rawText.trim()) { toast.error('Pehle text paste karo'); return; }
+    const { drafts: parsed, leftover: extra } = parsePasteBlock(rawText, employees);
+    if (!parsed.length) { toast.error('Koi valid lead format me nahi mila — 5 lines per lead honi chahiye'); return; }
+    setDrafts(parsed);
+    setLeftover(extra);
+    setStep('review');
+  };
+
+  const updateDraft = (idx: number, patch: Partial<DraftLead>) => {
+    setDrafts(prev => prev.map((d, i) => i === idx ? { ...d, ...patch } : d));
+  };
+  const removeDraft = (idx: number) => setDrafts(prev => prev.filter((_, i) => i !== idx));
+
+  const handleSubmitAll = async () => {
+    const invalid = drafts.some(d => !d.name.trim() || !d.phone.trim());
+    if (invalid) { toast.error('Har lead ka Name aur Phone zaroori hai'); return; }
+    setSubmitting(true);
+    try {
+      const rows = drafts.map(d => ({
+        name: d.name.trim(),
+        phone: d.phone.trim(),
+        current_operator: d.current_operator.trim() || null,
+        matching_number: d.matching_number.trim() || null,
+        notes: d.notes.trim() || null,
+        assigned_to: d.assigned_to || null,
+        status: 'Fresh',
+        created_date: new Date().toISOString(),
+      }));
+      const { error } = await supabase.from('leads').insert(rows);
+      if (error) throw error;
+      toast.success(`${rows.length} leads added`);
+      onSuccess();
+      onClose();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setSubmitting(false); }
+  };
+
+  if (step === 'paste') {
+    return (
+      <>
+        <DialogHeader><DialogTitle>Paste Leads</DialogTitle></DialogHeader>
+        <div className="py-3 space-y-2">
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Har lead ke liye <strong>5 lines</strong>, is order me:<br />
+            1) Customer Name &nbsp; 2) Mobile Number &nbsp; 3) Operator + Matching Number (e.g. "Jio 9012345678")<br />
+            4) Notes &nbsp; 5) Employee ka naam jisko assign karna hai
+          </p>
+          <textarea
+            className="w-full h-64 rounded-md border border-slate-200 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder={"Ram\n9876543210\nJio 9012345678\naaj hi karna hai.\nShivani"}
+            value={rawText}
+            onChange={e => setRawText(e.target.value)}
+            autoFocus
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleParse}>Parse & Review →</Button>
+        </DialogFooter>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2">
+          <button onClick={() => setStep('paste')} className="text-slate-400 hover:text-slate-700"><ArrowLeft className="h-4 w-4" /></button>
+          Review {drafts.length} Leads
+        </DialogTitle>
+        <DialogDescription>Check details, fix employee assignment if needed, then submit.</DialogDescription>
+      </DialogHeader>
+      {leftover > 0 && (
+        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
+          <AlertTriangle className="h-4 w-4 shrink-0" /> {leftover} extra line(s) at the end ignored — incomplete lead (need 5 lines).
+        </div>
+      )}
+      <div className="max-h-[55vh] overflow-y-auto space-y-3 py-2 pr-1">
+        {drafts.map((d, idx) => (
+          <div key={idx} className={cn("border rounded-lg p-3 space-y-2", !d.matched && !d.assigned_to ? "border-amber-300 bg-amber-50/40" : "border-slate-200")}>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-slate-400 uppercase">Lead #{idx + 1}</span>
+              <button onClick={() => removeDraft(idx)} className="text-slate-400 hover:text-red-500"><X className="h-3.5 w-3.5" /></button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><label className="text-[10px] font-medium text-slate-500">Name *</label>
+                <Input className="h-8 text-sm" value={d.name} onChange={e => updateDraft(idx, { name: e.target.value })} /></div>
+              <div><label className="text-[10px] font-medium text-slate-500">Phone *</label>
+                <Input className="h-8 text-sm" value={d.phone} onChange={e => updateDraft(idx, { phone: e.target.value })} /></div>
+              <div><label className="text-[10px] font-medium text-slate-500">Operator</label>
+                <Input className="h-8 text-sm" value={d.current_operator} onChange={e => updateDraft(idx, { current_operator: e.target.value })} /></div>
+              <div><label className="text-[10px] font-medium text-slate-500">Matching Number</label>
+                <Input className="h-8 text-sm" value={d.matching_number} onChange={e => updateDraft(idx, { matching_number: e.target.value })} /></div>
+            </div>
+            <div><label className="text-[10px] font-medium text-slate-500">Notes</label>
+              <Input className="h-8 text-sm" value={d.notes} onChange={e => updateDraft(idx, { notes: e.target.value })} /></div>
+            <div>
+              <label className="text-[10px] font-medium text-slate-500">Assign To {!d.matched && !d.assigned_to && <span className="text-amber-600">— name match nahi hua, select karo</span>}</label>
+              <Select value={d.assigned_to || '_none'} onValueChange={v => updateDraft(idx, { assigned_to: v === '_none' ? '' : v })}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="— Unassigned" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">— Unassigned</SelectItem>
+                  {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        ))}
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose}>Cancel</Button>
+        <Button onClick={handleSubmitAll} disabled={submitting || drafts.length === 0}>
+          {submitting ? 'Submitting...' : `Submit ${drafts.length} Leads`}
+        </Button>
+      </DialogFooter>
+    </>
+  );
+};
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 const LeadManagement: React.FC = () => {
   const [leads, setLeads]         = useState<any[]>([]);
@@ -103,6 +261,7 @@ const LeadManagement: React.FC = () => {
 
   // Modals
   const [isAddOpen,          setIsAddOpen]          = useState(false);
+  const [isPasteOpen,        setIsPasteOpen]         = useState(false);
   const [isUploadOpen,       setIsUploadOpen]        = useState(false);
   const [isAssignOpen,       setIsAssignOpen]        = useState(false);
   const [isEditOpen,         setIsEditOpen]          = useState(false);
@@ -323,6 +482,7 @@ const LeadManagement: React.FC = () => {
       <div className="flex flex-wrap gap-2 items-center justify-between">
         <div className="flex gap-2">
           <Button size="sm" onClick={() => setIsAddOpen(true)}><Plus className="h-4 w-4 mr-1" />Add Lead</Button>
+          <Button size="sm" variant="outline" onClick={() => setIsPasteOpen(true)}><ClipboardPaste className="h-4 w-4 mr-1" />Paste Leads</Button>
           <Button size="sm" variant="outline" onClick={() => setIsUploadOpen(true)}><Upload className="h-4 w-4 mr-1" />Upload</Button>
         </div>
         <div className="flex gap-2 flex-1 max-w-lg">
@@ -478,6 +638,13 @@ const LeadManagement: React.FC = () => {
       <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
         <DialogContent className="sm:max-w-[480px]">
           {isAddOpen && <AddLeadForm employees={employees} onClose={() => setIsAddOpen(false)} onSuccess={fetchData} />}
+        </DialogContent>
+      </Dialog>
+
+      {/* Paste Leads */}
+      <Dialog open={isPasteOpen} onOpenChange={setIsPasteOpen}>
+        <DialogContent className="sm:max-w-[560px]">
+          {isPasteOpen && <PasteLeadsFlow employees={employees} onClose={() => setIsPasteOpen(false)} onSuccess={fetchData} />}
         </DialogContent>
       </Dialog>
 
