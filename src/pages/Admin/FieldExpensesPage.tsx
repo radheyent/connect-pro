@@ -28,6 +28,7 @@ interface FieldExpense {
   description: string | null;
   status: 'pending' | 'approved' | 'rejected';
   admin_comment: string | null;
+  updated_at?: string;
   source: 'field';
 }
 interface EmployeeExpense {
@@ -39,6 +40,7 @@ interface EmployeeExpense {
   description: string;
   expense_date: string;
   status: 'pending' | 'approved' | 'rejected';
+  updated_at?: string;
   source: 'employee';
 }
 type CombinedRow = (FieldExpense | EmployeeExpense) & { userName: string };
@@ -54,6 +56,10 @@ const FieldExpensesPage: React.FC = () => {
   const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [userFilter, setUserFilter] = useState<string>('all');
+  const [creditOnly, setCreditOnly] = useState(false);
+  const [specificDate, setSpecificDate] = useState(''); // '' = whole month, else exact day filter
+  const [sortMode, setSortMode] = useState<'date' | 'recent'>('date');
+  const [selectMode, setSelectMode] = useState(false);
 
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState(EMPTY_FIELD_FORM);
@@ -109,12 +115,20 @@ const FieldExpensesPage: React.FC = () => {
   const combined: CombinedRow[] = useMemo(() => {
     const a: CombinedRow[] = fieldExpenses.map(f => ({ ...f, userName: userMap[f.field_boy_id] || 'Unknown' }));
     const b: CombinedRow[] = employeeExpenses.map(e => ({ ...e, userName: userMap[e.user_id] || 'Unknown' }));
-    return [...a, ...b]
+    const rows = [...a, ...b]
       .filter(r => r.expense_date?.startsWith(month))
+      .filter(r => !specificDate || r.expense_date === specificDate)
       .filter(r => statusFilter === 'all' || r.status === statusFilter)
       .filter(r => userFilter === 'all' || (r.source === 'field' ? r.field_boy_id : r.user_id) === userFilter)
-      .sort((x, y) => y.expense_date.localeCompare(x.expense_date));
-  }, [fieldExpenses, employeeExpenses, userMap, month, statusFilter, userFilter]);
+      .filter(r => !creditOnly || (r.source === 'field' && Number((r as FieldExpense).credit_total || 0) > 0));
+
+    return rows.sort((x, y) => {
+      if (sortMode === 'recent') {
+        return (y.updated_at || y.expense_date).localeCompare(x.updated_at || x.expense_date);
+      }
+      return y.expense_date.localeCompare(x.expense_date);
+    });
+  }, [fieldExpenses, employeeExpenses, userMap, month, specificDate, statusFilter, userFilter, creditOnly, sortMode]);
 
   const monthAll = useMemo(() => [
     ...fieldExpenses.map(f => ({ ...f, userName: userMap[f.field_boy_id] || 'Unknown' })),
@@ -512,9 +526,9 @@ const FieldExpensesPage: React.FC = () => {
       </div>
 
       <div className="flex flex-wrap gap-3 items-center justify-between">
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-2 items-center">
           <Select value={statusFilter} onValueChange={(v: any) => setStatusFilter(v)}>
-            <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Status</SelectItem>
               <SelectItem value="pending">Pending</SelectItem>
@@ -523,22 +537,58 @@ const FieldExpensesPage: React.FC = () => {
             </SelectContent>
           </Select>
           <Select value={userFilter} onValueChange={setUserFilter}>
-            <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Employees</SelectItem>
               {users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
             </SelectContent>
           </Select>
-        </div>
-        {selectedKeys.size > 0 && (
-          <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => setBulkDeleteOpen(true)}>
-            <Trash2 className="h-4 w-4 mr-1" /> Delete {selectedKeys.size} Selected
+          <Input
+            type="date"
+            value={specificDate}
+            onChange={(e) => setSpecificDate(e.target.value)}
+            className="w-40"
+            title="Specific date filter"
+          />
+          {specificDate && (
+            <Button variant="ghost" size="sm" className="h-9 px-2 text-slate-400" onClick={() => setSpecificDate('')}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          <Select value={sortMode} onValueChange={(v: any) => setSortMode(v)}>
+            <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="date">Date wise</SelectItem>
+              <SelectItem value="recent">Recent Changes</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant={creditOnly ? 'default' : 'outline'}
+            size="sm"
+            className={cn("h-9", creditOnly && "bg-green-600 hover:bg-green-700")}
+            onClick={() => setCreditOnly(v => !v)}
+          >
+            Credit Only
           </Button>
-        )}
+        </div>
+        <div className="flex items-center gap-2">
+          {selectMode && selectedKeys.size > 0 && (
+            <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => setBulkDeleteOpen(true)}>
+              <Trash2 className="h-4 w-4 mr-1" /> Delete {selectedKeys.size}
+            </Button>
+          )}
+          <Button
+            variant={selectMode ? 'secondary' : 'outline'}
+            size="sm"
+            onClick={() => { setSelectMode(v => !v); setSelectedKeys(new Set()); }}
+          >
+            {selectMode ? 'Cancel' : 'Select'}
+          </Button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        {combined.length > 0 && (
+        {selectMode && combined.length > 0 && (
           <div className="flex items-center gap-2 px-4 py-2 border-b border-slate-100 bg-slate-50">
             <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="h-4 w-4 rounded border-slate-300" />
             <span className="text-xs text-slate-500 font-medium">Select all</span>
@@ -555,12 +605,14 @@ const FieldExpensesPage: React.FC = () => {
             return (
               <div key={rowKey(row)} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 hover:bg-slate-50">
                 <div className="flex items-center gap-3 min-w-0">
-                  <input
-                    type="checkbox"
-                    checked={selectedKeys.has(rowKey(row))}
-                    onChange={() => toggleSelectOne(row)}
-                    className="h-4 w-4 rounded border-slate-300 shrink-0"
-                  />
+                  {selectMode && (
+                    <input
+                      type="checkbox"
+                      checked={selectedKeys.has(rowKey(row))}
+                      onChange={() => toggleSelectOne(row)}
+                      className="h-4 w-4 rounded border-slate-300 shrink-0"
+                    />
+                  )}
                   <div className="h-9 w-9 rounded-full bg-orange-50 text-orange-600 flex items-center justify-center shrink-0">
                     <User className="h-4 w-4" />
                   </div>
