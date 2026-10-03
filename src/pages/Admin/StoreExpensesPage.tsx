@@ -56,6 +56,8 @@ const StoreExpensesPage: React.FC = () => {
   const [expenses, setExpenses] = useState<OfficeExpense[]>([]);
   const [credits, setCredits] = useState<AdminCredit[]>([]);
   const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
+  const [specificDate, setSpecificDate] = useState(''); // '' = whole month
+  const [categoryView, setCategoryView] = useState(false);
 
   const [expenseOpen, setExpenseOpen] = useState(false);
   const [expenseForm, setExpenseForm] = useState(EMPTY_EXPENSE);
@@ -97,8 +99,27 @@ const StoreExpensesPage: React.FC = () => {
 
   useEffect(() => { fetchAll(); }, []);
 
-  const monthExpenses = useMemo(() => expenses.filter(e => e.expense_date?.startsWith(month)), [expenses, month]);
-  const monthCredits = useMemo(() => credits.filter(c => c.credit_date?.startsWith(month)), [credits, month]);
+  const monthExpenses = useMemo(
+    () => expenses.filter(e => e.expense_date?.startsWith(month) && (!specificDate || e.expense_date === specificDate)),
+    [expenses, month, specificDate]
+  );
+  const monthCredits = useMemo(
+    () => credits.filter(c => c.credit_date?.startsWith(month) && (!specificDate || c.credit_date === specificDate)),
+    [credits, month, specificDate]
+  );
+
+  // Category-wise spend breakdown (expenses only) for the "Category wise spent" view
+  const categoryBreakdown = useMemo(() => {
+    const map: Record<string, { total: number; count: number }> = {};
+    monthExpenses.forEach(e => {
+      if (!map[e.category]) map[e.category] = { total: 0, count: 0 };
+      map[e.category].total += Number(e.amount);
+      map[e.category].count += 1;
+    });
+    return Object.entries(map)
+      .map(([category, v]) => ({ category, ...v }))
+      .sort((a, b) => b.total - a.total);
+  }, [monthExpenses]);
 
   const totalSpent = monthExpenses.reduce((s, e) => s + Number(e.amount), 0);
   const totalCredit = monthCredits.reduce((s, c) => s + Number(c.amount), 0);
@@ -359,18 +380,63 @@ const StoreExpensesPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex items-center justify-center gap-3 bg-white border border-slate-200 rounded-xl p-3 shadow-sm relative">
+      <div className="flex flex-wrap items-center justify-center gap-3 bg-white border border-slate-200 rounded-xl p-3 shadow-sm relative">
         <Button variant="ghost" size="sm" onClick={() => shiftMonth(-1)}><ChevronLeft className="h-4 w-4" /></Button>
         <span className="font-semibold text-slate-800 w-36 text-center">
           {format(parseISO(month + '-01'), 'MMMM yyyy')}
         </span>
         <Button variant="ghost" size="sm" onClick={() => shiftMonth(1)}><ChevronRight className="h-4 w-4" /></Button>
+        <Input
+          type="date"
+          value={specificDate}
+          onChange={(e) => setSpecificDate(e.target.value)}
+          className="w-40 h-9"
+          title="Specific date filter"
+        />
+        {specificDate && (
+          <Button variant="ghost" size="sm" className="h-9 px-2 text-slate-400" onClick={() => setSpecificDate('')}>
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        <Button
+          variant={categoryView ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setCategoryView(v => !v)}
+        >
+          Category Wise
+        </Button>
         {selectedKeys.size > 0 && (
-          <Button variant="outline" size="sm" className="absolute right-3 text-red-600 border-red-200 hover:bg-red-50" onClick={() => setBulkDeleteOpen(true)}>
+          <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => setBulkDeleteOpen(true)}>
             <Trash2 className="h-4 w-4 mr-1" /> Delete {selectedKeys.size} Selected
           </Button>
         )}
       </div>
+
+      {categoryView && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+            <h3 className="text-sm font-semibold text-slate-700">Category Wise Spent — {format(parseISO(month + '-01'), 'MMMM yyyy')}{specificDate ? ` • ${format(parseISO(specificDate), 'dd MMM')}` : ''}</h3>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {categoryBreakdown.length === 0 ? (
+              <div className="p-6 text-center text-slate-400 text-sm">Is period me koi expense nahi hai</div>
+            ) : categoryBreakdown.map(c => (
+              <div key={c.category} className="flex items-center justify-between gap-3 p-3.5">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-8 w-8 rounded-full bg-red-50 text-red-500 flex items-center justify-center shrink-0 text-xs font-bold">
+                    {c.category.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">{c.category}</p>
+                    <p className="text-[11px] text-slate-400">{c.count} entr{c.count > 1 ? 'ies' : 'y'}</p>
+                  </div>
+                </div>
+                <span className="font-bold text-sm text-red-500">₹{c.total.toLocaleString('en-IN')}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl border border-red-100 p-4 shadow-sm">
