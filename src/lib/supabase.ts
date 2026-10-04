@@ -37,6 +37,7 @@ export interface Lead {
   added_by?: string;
   last_call_date?: string;
   notes?: string;
+  location_link?: string;
   important: boolean;
   created_date: string;
   completed_date?: string;
