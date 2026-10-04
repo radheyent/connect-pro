@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/select';
 import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { Share2, Phone, History, Users, Clock, Plus, Info } from 'lucide-react';
+import { Share2, Phone, History, Users, Clock, Plus, Info, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -45,6 +45,7 @@ const EmployeeLeadsPage: React.FC = () => {
   const [editStatus, setEditStatus] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [editFollowUpDate, setEditFollowUpDate] = useState('');
+  const [editLocationLink, setEditLocationLink] = useState('');
   const [editFollowUpTime, setEditFollowUpTime] = useState('');
 
   // Call History State
@@ -182,9 +183,13 @@ const EmployeeLeadsPage: React.FC = () => {
 
   const handleUpdateStatus = async () => {
     if (!activeLead) return;
+    if (editLocationLink.trim() && !/^https?:\/\//i.test(editLocationLink.trim())) {
+      toast.error('Location link http:// ya https:// se shuru hona chahiye'); return;
+    }
     try {
       const { error } = await supabase.from('leads').update({
         status: editStatus, notes: editNotes,
+        location_link: editLocationLink.trim() || null,
         follow_up_date: editStatus === 'Follow-up' ? editFollowUpDate || null : null,
         follow_up_time: editStatus === 'Follow-up' ? editFollowUpTime || null : null
       }).eq('id', activeLead.id);
@@ -193,6 +198,16 @@ const EmployeeLeadsPage: React.FC = () => {
       setIsEditModalOpen(false);
       fetchLeads();
     } catch { toast.error('Update failed'); }
+  };
+
+  const handleShareLocation = async (lead: Lead) => {
+    if (!lead.location_link) return;
+    const text = `📍 ${lead.name}'s visit location:\n${lead.location_link}`;
+    if (navigator.share) {
+      try { await navigator.share({ text }); } catch { /* user cancelled */ }
+    } else {
+      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    }
   };
 
   const handleWAShare = async () => {
@@ -406,6 +421,7 @@ const EmployeeLeadsPage: React.FC = () => {
                             setActiveLead(lead);
                             setEditStatus(lead.status || 'Fresh');
                             setEditNotes(lead.notes || '');
+                            setEditLocationLink(lead.location_link || '');
                             setEditFollowUpDate(lead.follow_up_date || '');
                             setEditFollowUpTime(lead.follow_up_time || '');
                             setIsEditModalOpen(true);
@@ -491,6 +507,7 @@ const EmployeeLeadsPage: React.FC = () => {
                       setActiveLead(lead);
                       setEditStatus(lead.status || 'Fresh');
                       setEditNotes(lead.notes || '');
+                      setEditLocationLink(lead.location_link || '');
                       setEditFollowUpDate(lead.follow_up_date || '');
                       setEditFollowUpTime(lead.follow_up_time || '');
                       setIsEditModalOpen(true);
@@ -591,6 +608,11 @@ const EmployeeLeadsPage: React.FC = () => {
               <label className="text-sm font-medium mb-1 block">Notes</label>
               <Input value={editNotes} onChange={e => setEditNotes(e.target.value)}
                 placeholder="Add call notes..." />
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-1 block flex items-center gap-1"><MapPin className="h-3.5 w-3.5" /> Customer Location (Google Maps link)</label>
+              <Input value={editLocationLink} onChange={e => setEditLocationLink(e.target.value)}
+                placeholder="https://maps.google.com/?q=..." />
             </div>
             {editStatus === 'Follow-up' && <FollowUpFields />}
           </div>
@@ -871,6 +893,29 @@ const EmployeeLeadsPage: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {activeLead?.location_link && (
+              <div className="flex items-center gap-2">
+                <a
+                  href={activeLead.location_link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 flex items-center gap-2.5 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2.5 hover:bg-blue-100 transition-colors"
+                >
+                  <MapPin className="h-4 w-4 text-blue-600 shrink-0" />
+                  <span className="text-sm font-bold text-blue-700">Open Customer Location</span>
+                </a>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-11 w-11 p-0 border-blue-200 text-blue-600 shrink-0"
+                  onClick={() => handleShareLocation(activeLead)}
+                  title="Share location"
+                >
+                  <Share2 className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* ── Footer Actions ── */}
@@ -887,6 +932,7 @@ const EmployeeLeadsPage: React.FC = () => {
                 setIsDetailsModalOpen(false);
                 setEditStatus(activeLead?.status || 'Fresh');
                 setEditNotes(activeLead?.notes || '');
+                setEditLocationLink(activeLead?.location_link || '');
                 setEditFollowUpDate(activeLead?.follow_up_date || '');
                 setEditFollowUpTime(activeLead?.follow_up_time || '');
                 setIsEditModalOpen(true);
