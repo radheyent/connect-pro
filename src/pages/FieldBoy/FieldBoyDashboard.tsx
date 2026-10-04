@@ -21,7 +21,7 @@ import {
   DialogTitle, 
   DialogFooter
 } from '@/components/ui/dialog';
-import { Phone, CheckCircle2, Search, History, RefreshCw, XCircle } from 'lucide-react';
+import { Phone, CheckCircle2, Search, History, RefreshCw, XCircle, MapPin, Navigation } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 
@@ -170,6 +170,7 @@ const FieldBoyDashboard: React.FC = () => {
                         <button className="flex items-center gap-2 hover:underline text-left" onClick={() => { setDetailLead({...lead, assigned_user_name: empMap[lead.assigned_to] || 'Unassigned'}); setIsDetailOpen(true); }}>
                           {lead.name}
                           {lead.important && <Badge variant="destructive" className="h-2 w-2 p-0 rounded-full" title="Important" />}
+                          {lead.location_link && <MapPin className="h-3 w-3 text-blue-500" title="Location attached" />}
                         </button>
                       </TableCell>
                       <TableCell className="font-mono text-xs">{lead.phone}</TableCell>
@@ -250,6 +251,16 @@ const FieldBoyDashboard: React.FC = () => {
               </div>
               {detailLead.notes && (
                 <div><p className="text-xs text-slate-400 uppercase mb-1">Notes</p><p className="bg-slate-50 rounded p-2 text-xs">{detailLead.notes}</p></div>
+              )}
+              {detailLead.location_link && (
+                <a
+                  href={detailLead.location_link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl py-3 text-sm shadow-sm transition-colors"
+                >
+                  <Navigation className="h-4 w-4" /> Get Directions
+                </a>
               )}
             </div>
           )}
