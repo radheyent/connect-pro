@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { CalendarClock, Phone, User, Pencil, Wifi, AlertTriangle } from 'lucide-react';
+import { CalendarClock, Phone, User, Pencil, Wifi, AlertTriangle, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format, parseISO, isToday, isBefore, startOfDay } from 'date-fns';
@@ -19,6 +19,7 @@ interface LeadRow {
   current_operator?: string;
   matching_number?: string;
   notes?: string;
+  location_link?: string;
   status: string;
   assigned_to?: string;
   follow_up_date?: string;
@@ -32,7 +33,7 @@ const FollowUpsPage: React.FC = () => {
   const [empFilter, setEmpFilter] = useState('all');
 
   const [editTarget, setEditTarget] = useState<LeadRow | null>(null);
-  const [editForm, setEditForm] = useState({ status: '', follow_up_date: '', follow_up_time: '', notes: '', assigned_to: '' });
+  const [editForm, setEditForm] = useState({ status: '', follow_up_date: '', follow_up_time: '', notes: '', assigned_to: '', location_link: '' });
   const [saving, setSaving] = useState(false);
 
   const userMap = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e.name])), [employees]);
@@ -80,17 +81,22 @@ const FollowUpsPage: React.FC = () => {
       follow_up_time: lead.follow_up_time || '',
       notes: lead.notes || '',
       assigned_to: lead.assigned_to || '',
+      location_link: lead.location_link || '',
     });
   };
 
   const saveEdit = async () => {
     if (!editTarget) return;
+    if (editForm.location_link.trim() && !/^https?:\/\//i.test(editForm.location_link.trim())) {
+      toast.error('Location link http:// ya https:// se shuru hona chahiye'); return;
+    }
     setSaving(true);
     try {
       const payload: any = {
         status: editForm.status,
         notes: editForm.notes.trim() || null,
         assigned_to: editForm.assigned_to || null,
+        location_link: editForm.location_link.trim() || null,
         follow_up_date: editForm.status === 'Follow-up' ? (editForm.follow_up_date || null) : null,
         follow_up_time: editForm.status === 'Follow-up' ? (editForm.follow_up_time || null) : null,
       };
@@ -138,6 +144,17 @@ const FollowUpsPage: React.FC = () => {
         <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Notes</p>
         <p className="text-xs text-slate-700 whitespace-pre-wrap">{lead.notes || '— no notes —'}</p>
       </div>
+
+      {lead.location_link && (
+        <a
+          href={lead.location_link}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 text-xs font-medium text-blue-600 bg-blue-50 rounded-lg px-2.5 py-1.5 w-fit hover:bg-blue-100"
+        >
+          <MapPin className="h-3.5 w-3.5" /> Open Location
+        </a>
+      )}
     </div>
   );
 
@@ -241,6 +258,14 @@ const FollowUpsPage: React.FC = () => {
                 value={editForm.notes}
                 onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
                 placeholder="Notes likho..."
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block flex items-center gap-1"><MapPin className="h-3 w-3" /> Customer Location (Google Maps link)</label>
+              <Input
+                value={editForm.location_link}
+                onChange={(e) => setEditForm({ ...editForm, location_link: e.target.value })}
+                placeholder="https://maps.google.com/?q=..."
               />
             </div>
           </div>

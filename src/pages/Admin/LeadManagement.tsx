@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Upload, Download, Search, UserPlus, Trash2, Edit, Info, Clock, X, AlertTriangle, ChevronLeft, ChevronRight, ClipboardPaste, ArrowLeft } from 'lucide-react';
+import { Plus, Upload, Download, Search, UserPlus, Trash2, Edit, Info, Clock, X, AlertTriangle, ChevronLeft, ChevronRight, ClipboardPaste, ArrowLeft, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -284,6 +284,7 @@ const LeadManagement: React.FC = () => {
   const [editFollowUpDate, setEditFollowUpDate] = useState('');
   const [editFollowUpTime, setEditFollowUpTime] = useState('');
   const [editNotes,        setEditNotes]        = useState('');
+  const [editLocationLink, setEditLocationLink] = useState('');
   const [editAssigneeId,   setEditAssigneeId]   = useState('');
   const [assigneeId,       setAssigneeId]       = useState('');
   const [deleteSingleLead, setDeleteSingleLead] = useState<any>(null);
@@ -384,6 +385,7 @@ const LeadManagement: React.FC = () => {
     setEditFollowUpDate(lead.follow_up_date || '');
     setEditFollowUpTime(lead.follow_up_time || '');
     setEditNotes(lead.notes || '');
+    setEditLocationLink(lead.location_link || '');
     setIsEditOpen(true);
   }, []);
 
@@ -395,11 +397,15 @@ const LeadManagement: React.FC = () => {
   const handleUpdateLead = async () => {
     if (!activeLead) return;
     if (editStatus === 'Follow-up' && !editFollowUpDate) { toast.error('Follow-up date zaroori hai'); return; }
+    if (editLocationLink.trim() && !/^https?:\/\//i.test(editLocationLink.trim())) {
+      toast.error('Location link http:// ya https:// se shuru hona chahiye'); return;
+    }
     try {
       const { error } = await supabase.from('leads').update({
         status: editStatus,
         assigned_to: editAssigneeId === '_unassigned' || !editAssigneeId ? null : editAssigneeId,
         notes: editNotes.trim() || null,
+        location_link: editLocationLink.trim() || null,
         follow_up_date: editStatus === 'Follow-up' ? (editFollowUpDate || null) : null,
         follow_up_time: editStatus === 'Follow-up' ? (editFollowUpTime || null) : null,
       }).eq('id', activeLead.id);
@@ -713,6 +719,20 @@ const LeadManagement: React.FC = () => {
                 <p className="text-sm text-slate-700 whitespace-pre-wrap">{activeLead.notes}</p>
               </div>
             )}
+            {activeLead?.location_link && (
+              <a
+                href={activeLead.location_link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2.5 p-3 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+              >
+                <MapPin className="h-4 w-4 text-blue-600 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold text-blue-700 uppercase">Customer Location</p>
+                  <p className="text-xs text-blue-600 truncate">{activeLead.location_link}</p>
+                </div>
+              </a>
+            )}
           </div>
           <div className="p-4 border-t bg-slate-50 flex gap-2">
             <Button className="flex-1" size="sm" onClick={() => { setIsDetailOpen(false); openEdit(activeLead); }}>
@@ -811,6 +831,13 @@ const LeadManagement: React.FC = () => {
                 value={editNotes}
                 onChange={e => setEditNotes(e.target.value)}
                 placeholder="Notes likho..."
+              /></div>
+
+            <div><label className="text-xs font-medium text-slate-600 mb-1 block flex items-center gap-1"><MapPin className="h-3 w-3" /> Customer Location (Google Maps link)</label>
+              <Input
+                value={editLocationLink}
+                onChange={e => setEditLocationLink(e.target.value)}
+                placeholder="https://maps.google.com/?q=..."
               /></div>
 
             <div><label className="text-xs font-medium text-slate-600 mb-1 block">Assigned To</label>
