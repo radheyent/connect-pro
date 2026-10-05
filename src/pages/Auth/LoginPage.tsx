@@ -1,18 +1,3 @@
-/**
- * Connect Pro — Login Page (v2: "Living Network")
- * Path: src/pages/Auth/LoginPage.tsx
- *
- * No new npm dependencies. React + react-router-dom + lucide-react + Tailwind + Canvas 2D + CSS.
- * Fonts (Syne + Manrope) are loaded from Google Fonts via CSS @import — nothing to install.
- *
- * What is interactive:
- *  - Full-screen live network (canvas): nodes drift, connect, and pass glowing data packets.
- *  - Your cursor / finger becomes a node: nearby nodes link to it and are gently pulled toward it.
- *  - Tap / click anywhere → signal ripple.
- *  - Typing in the form raises the network's "energy" (more packets, faster flow).
- *  - Sign in → ripples pulse out of the card; success → full-screen burst, then redirect.
- *  - Card tilts in 3D and gets a light-following border on desktop.
- */
 import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -28,17 +13,13 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
-/* ================================================================== */
-/* Network engine (canvas)                                             */
-/* ================================================================== */
-
 interface Signal {
-  energy: number; // 0..1.4 — how "alive" the network is
+  energy: number;
   mode: 'idle' | 'loading' | 'success';
-  burst: number; // increment to trigger a success burst
-  ox: number; // origin (card center) in viewport px
+  burst: number;
+  ox: number;
   oy: number;
-  pulse: number; // increment to trigger a single ripple from origin
+  pulse: number;
 }
 
 type Particle = {
@@ -63,18 +44,21 @@ function startNetwork(canvas: HTMLCanvasElement, sigRef: RefObject<Signal>): () 
   let h = 0;
   let linkD = 130;
   let ps: Particle[] = [];
+  let pos: { x: number; y: number }[] = [];
+  let adj: number[][] = [];
   let packets: Packet[] = [];
   let ripples: Ripple[] = [];
   let raf = 0;
   let lastBurst = 0;
   let lastPulse = 0;
   let frameCount = 0;
+  const buckets: number[][] = [[], [], [], []];
 
   const ptr = { x: -9999, y: -9999, active: false, nx: 0, ny: 0, tx: 0, ty: 0 };
   let touchTimer = 0;
 
   const resize = () => {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     w = window.innerWidth;
     h = window.innerHeight;
     canvas.width = Math.floor(w * dpr);
@@ -84,8 +68,8 @@ function startNetwork(canvas: HTMLCanvasElement, sigRef: RefObject<Signal>): () 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const small = w < 640;
-    linkD = small ? 105 : 142;
-    const count = Math.max(24, Math.min(small ? 48 : 100, Math.floor((w * h) / 15500)));
+    linkD = small ? 100 : 135;
+    const count = Math.max(22, Math.min(small ? 34 : 70, Math.floor((w * h) / 20000)));
     ps = Array.from({ length: count }, () => {
       const z = Math.random();
       return {
@@ -93,28 +77,18 @@ function startNetwork(canvas: HTMLCanvasElement, sigRef: RefObject<Signal>): () 
         y: Math.random() * h,
         vx: (Math.random() - 0.5) * 0.28,
         vy: (Math.random() - 0.5) * 0.28,
-        r: 0.8 + z * 1.9,
+        r: 0.8 + z * 1.8,
         z,
         glow: 0,
       };
     });
+    pos = ps.map(() => ({ x: 0, y: 0 }));
+    adj = ps.map(() => []);
     packets = [];
   };
 
-  const neighbours = (i: number, pos: { x: number; y: number }[]) => {
-    const out: number[] = [];
-    const a = pos[i];
-    for (let j = 0; j < pos.length; j++) {
-      if (j === i) continue;
-      const dx = a.x - pos[j].x;
-      const dy = a.y - pos[j].y;
-      if (dx * dx + dy * dy < linkD * linkD) out.push(j);
-    }
-    return out;
-  };
-
   const spawnRipple = (x: number, y: number, max = 240, delay = 0) => {
-    if (ripples.length < 14) ripples.push({ x, y, r: 6, max, a: 1, delay });
+    if (ripples.length < 10) ripples.push({ x, y, r: 6, max, a: 1, delay });
   };
 
   const frame = () => {
@@ -123,11 +97,9 @@ function startNetwork(canvas: HTMLCanvasElement, sigRef: RefObject<Signal>): () 
     const s = sigRef.current;
     if (!s) return;
 
-    /* energy eases toward a base level for the current mode */
     const base = s.mode === 'idle' ? 0.22 : s.mode === 'loading' ? 0.85 : 1.0;
     s.energy += (base - s.energy) * 0.03;
 
-    /* triggers */
     if (s.burst !== lastBurst) {
       lastBurst = s.burst;
       spawnRipple(s.ox, s.oy, Math.max(w, h) * 0.9, 0);
@@ -146,13 +118,11 @@ function startNetwork(canvas: HTMLCanvasElement, sigRef: RefObject<Signal>): () 
     ptr.ny += (ptr.ty - ptr.ny) * 0.06;
 
     ctx.clearRect(0, 0, w, h);
-    ctx.globalCompositeOperation = 'lighter';
 
     const speedK = 0.55 + s.energy * 1.3;
+    const n = ps.length;
 
-    /* update + project particles (parallax by depth) */
-    const pos: { x: number; y: number }[] = new Array(ps.length);
-    for (let i = 0; i < ps.length; i++) {
+    for (let i = 0; i < n; i++) {
       const p = ps[i];
 
       if (ptr.active) {
@@ -167,10 +137,9 @@ function startNetwork(canvas: HTMLCanvasElement, sigRef: RefObject<Signal>): () 
       }
 
       const sp = Math.hypot(p.vx, p.vy);
-      const maxSp = 0.85;
-      if (sp > maxSp) {
-        p.vx = (p.vx / sp) * maxSp;
-        p.vy = (p.vy / sp) * maxSp;
+      if (sp > 0.85) {
+        p.vx = (p.vx / sp) * 0.85;
+        p.vy = (p.vy / sp) * 0.85;
       }
       p.vx *= 0.998;
       p.vy *= 0.998;
@@ -187,60 +156,71 @@ function startNetwork(canvas: HTMLCanvasElement, sigRef: RefObject<Signal>): () 
       else if (p.y > h + 30) p.y = -30;
 
       p.glow *= 0.94;
-      pos[i] = { x: p.x + ptr.nx * p.z * 16, y: p.y + ptr.ny * p.z * 16 };
+      pos[i].x = p.x + ptr.nx * p.z * 16;
+      pos[i].y = p.y + ptr.ny * p.z * 16;
+      adj[i].length = 0;
     }
 
-    /* links */
-    ctx.lineWidth = 0.8;
-    const linkAlpha = 0.26 + s.energy * 0.22;
-    for (let i = 0; i < pos.length; i++) {
-      for (let j = i + 1; j < pos.length; j++) {
+    const linkD2 = linkD * linkD;
+    for (let b = 0; b < 4; b++) buckets[b].length = 0;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
         const dx = pos[i].x - pos[j].x;
         const dy = pos[i].y - pos[j].y;
         const d2 = dx * dx + dy * dy;
-        if (d2 < linkD * linkD) {
-          const a = (1 - Math.sqrt(d2) / linkD) * linkAlpha;
-          ctx.strokeStyle = `rgba(129,140,248,${a.toFixed(3)})`;
-          ctx.beginPath();
-          ctx.moveTo(pos[i].x, pos[i].y);
-          ctx.lineTo(pos[j].x, pos[j].y);
-          ctx.stroke();
+        if (d2 < linkD2) {
+          adj[i].push(j);
+          adj[j].push(i);
+          const q = 1 - Math.sqrt(d2) / linkD;
+          buckets[Math.min(3, Math.floor(q * 4))].push(i, j);
         }
       }
     }
 
-    /* pointer node + links */
+    const linkAlpha = 0.3 + s.energy * 0.22;
+    ctx.lineWidth = 0.8;
+    for (let b = 0; b < 4; b++) {
+      const list = buckets[b];
+      if (!list.length) continue;
+      ctx.strokeStyle = `rgba(129,140,248,${(linkAlpha * ((b + 0.6) / 4)).toFixed(3)})`;
+      ctx.beginPath();
+      for (let k = 0; k < list.length; k += 2) {
+        ctx.moveTo(pos[list[k]].x, pos[list[k]].y);
+        ctx.lineTo(pos[list[k + 1]].x, pos[list[k + 1]].y);
+      }
+      ctx.stroke();
+    }
+
     if (ptr.active) {
-      const g = ctx.createRadialGradient(ptr.x, ptr.y, 0, ptr.x, ptr.y, 130);
+      const g = ctx.createRadialGradient(ptr.x, ptr.y, 0, ptr.x, ptr.y, 120);
       g.addColorStop(0, 'rgba(99,102,241,0.22)');
       g.addColorStop(1, 'rgba(99,102,241,0)');
       ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(ptr.x, ptr.y, 130, 0, Math.PI * 2);
+      ctx.arc(ptr.x, ptr.y, 120, 0, Math.PI * 2);
       ctx.fill();
 
+      ctx.strokeStyle = 'rgba(103,232,249,0.4)';
       ctx.lineWidth = 1;
-      for (let i = 0; i < pos.length; i++) {
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) {
         const d = Math.hypot(pos[i].x - ptr.x, pos[i].y - ptr.y);
-        if (d < 190) {
-          ctx.strokeStyle = `rgba(103,232,249,${((1 - d / 190) * 0.55).toFixed(3)})`;
-          ctx.beginPath();
+        if (d < 180) {
           ctx.moveTo(ptr.x, ptr.y);
           ctx.lineTo(pos[i].x, pos[i].y);
-          ctx.stroke();
           if (d < 90) ps[i].glow = Math.max(ps[i].glow, 0.6);
         }
       }
+      ctx.stroke();
       ctx.fillStyle = 'rgba(207,250,254,0.95)';
       ctx.beginPath();
       ctx.arc(ptr.x, ptr.y, 2.4, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    /* data packets travel along links and hop to the next node */
-    if (!reduce && packets.length < 46 && Math.random() < 0.02 + s.energy * 0.14) {
-      const i = Math.floor(Math.random() * pos.length);
-      const nb = neighbours(i, pos);
+    if (!reduce && packets.length < 30 && Math.random() < 0.02 + s.energy * 0.1) {
+      const i = Math.floor(Math.random() * n);
+      const nb = adj[i];
       if (nb.length) {
         packets.push({
           a: i,
@@ -250,29 +230,22 @@ function startNetwork(canvas: HTMLCanvasElement, sigRef: RefObject<Signal>): () 
         });
       }
     }
+
+    ctx.lineWidth = 1.6;
     for (let k = packets.length - 1; k >= 0; k--) {
       const pk = packets[k];
       pk.t += pk.s * (0.7 + s.energy * 1.1);
       const A = pos[pk.a];
       const B = pos[pk.b];
-      if (!A || !B) {
-        packets.splice(k, 1);
-        continue;
-      }
-      if (Math.hypot(A.x - B.x, A.y - B.y) > linkD * 1.1) {
+      if (!A || !B || Math.hypot(A.x - B.x, A.y - B.y) > linkD * 1.1) {
         packets.splice(k, 1);
         continue;
       }
       if (pk.t >= 1) {
         ps[pk.b].glow = 1;
-        const nb = neighbours(pk.b, pos).filter((n) => n !== pk.a);
+        const nb = adj[pk.b].filter((m) => m !== pk.a);
         if (nb.length && Math.random() < 0.62) {
-          packets[k] = {
-            a: pk.b,
-            b: nb[Math.floor(Math.random() * nb.length)],
-            t: 0,
-            s: pk.s,
-          };
+          packets[k] = { a: pk.b, b: nb[Math.floor(Math.random() * nb.length)], t: 0, s: pk.s };
         } else {
           packets.splice(k, 1);
         }
@@ -280,20 +253,15 @@ function startNetwork(canvas: HTMLCanvasElement, sigRef: RefObject<Signal>): () 
       }
       const x = A.x + (B.x - A.x) * pk.t;
       const y = A.y + (B.y - A.y) * pk.t;
-      const tx = A.x + (B.x - A.x) * Math.max(0, pk.t - 0.14);
-      const ty = A.y + (B.y - A.y) * Math.max(0, pk.t - 0.14);
-      const tg = ctx.createLinearGradient(tx, ty, x, y);
-      tg.addColorStop(0, 'rgba(34,211,238,0)');
-      tg.addColorStop(1, 'rgba(165,243,252,0.95)');
-      ctx.strokeStyle = tg;
-      ctx.lineWidth = 1.6;
+      const t0 = Math.max(0, pk.t - 0.14);
+      ctx.strokeStyle = 'rgba(165,243,252,0.75)';
       ctx.beginPath();
-      ctx.moveTo(tx, ty);
+      ctx.moveTo(A.x + (B.x - A.x) * t0, A.y + (B.y - A.y) * t0);
       ctx.lineTo(x, y);
       ctx.stroke();
       ctx.fillStyle = 'rgba(34,211,238,0.22)';
       ctx.beginPath();
-      ctx.arc(x, y, 8, 0, Math.PI * 2);
+      ctx.arc(x, y, 7, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = 'rgba(236,254,255,1)';
       ctx.beginPath();
@@ -301,8 +269,7 @@ function startNetwork(canvas: HTMLCanvasElement, sigRef: RefObject<Signal>): () 
       ctx.fill();
     }
 
-    /* nodes */
-    for (let i = 0; i < pos.length; i++) {
+    for (let i = 0; i < n; i++) {
       const p = ps[i];
       if (p.glow > 0.03) {
         ctx.fillStyle = `rgba(34,211,238,${(p.glow * 0.3).toFixed(3)})`;
@@ -316,7 +283,7 @@ function startNetwork(canvas: HTMLCanvasElement, sigRef: RefObject<Signal>): () 
       ctx.fill();
     }
 
-    /* ripples */
+    ctx.lineWidth = 1.4;
     for (let k = ripples.length - 1; k >= 0; k--) {
       const r = ripples[k];
       if (r.delay > 0) {
@@ -329,29 +296,21 @@ function startNetwork(canvas: HTMLCanvasElement, sigRef: RefObject<Signal>): () 
         ripples.splice(k, 1);
         continue;
       }
-      ctx.lineWidth = 1.4;
       ctx.strokeStyle = `rgba(165,180,252,${(r.a * 0.6).toFixed(3)})`;
       ctx.beginPath();
       ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.strokeStyle = `rgba(103,232,249,${(r.a * 0.28).toFixed(3)})`;
-      ctx.beginPath();
-      ctx.arc(r.x, r.y, r.r * 0.82, 0, Math.PI * 2);
-      ctx.stroke();
     }
-
-    ctx.globalCompositeOperation = 'source-over';
   };
 
-  /* events */
   const onMove = (e: PointerEvent) => {
     ptr.x = e.clientX;
     ptr.y = e.clientY;
     ptr.active = true;
     ptr.tx = (e.clientX / w - 0.5) * 2;
     ptr.ty = (e.clientY / h - 0.5) * 2;
-    window.clearTimeout(touchTimer);
     if (e.pointerType !== 'mouse') {
+      window.clearTimeout(touchTimer);
       touchTimer = window.setTimeout(() => {
         ptr.active = false;
       }, 900);
@@ -391,10 +350,6 @@ function startNetwork(canvas: HTMLCanvasElement, sigRef: RefObject<Signal>): () 
   };
 }
 
-/* ================================================================== */
-/* Content                                                             */
-/* ================================================================== */
-
 const STAGES = ['Fresh', 'Connected', 'Interested', 'Visit', 'Complete'];
 
 const FEED = [
@@ -410,15 +365,12 @@ const WORDS = ['Leads', 'Calls', 'Field Visits', 'Expenses', 'Sales'];
 
 type Status = 'idle' | 'loading' | 'success';
 
-/* ================================================================== */
-/* Page                                                                */
-/* ================================================================== */
-
 export default function LoginPage() {
   const navigate = useNavigate();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const tiltRef = useRef<HTMLDivElement>(null);
+  const tiltRaf = useRef(0);
   const sig = useRef<Signal>({ energy: 0.22, mode: 'idle', burst: 0, ox: 0, oy: 0, pulse: 0 });
 
   const [email, setEmail] = useState('');
@@ -431,14 +383,12 @@ export default function LoginPage() {
   const [tick, setTick] = useState(0);
   const [stage, setStage] = useState(0);
 
-  /* start the living network */
   useEffect(() => {
     const c = canvasRef.current;
     if (!c) return;
     return startNetwork(c, sig);
   }, []);
 
-  /* hero timers */
   useEffect(() => {
     const a = window.setInterval(() => setTick((t) => t + 1), 2600);
     const b = window.setInterval(() => setStage((s) => (s + 1) % STAGES.length), 1700);
@@ -449,7 +399,13 @@ export default function LoginPage() {
   }, []);
 
   const redirectTimer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(redirectTimer.current), []);
+  useEffect(
+    () => () => {
+      window.clearTimeout(redirectTimer.current);
+      cancelAnimationFrame(tiltRaf.current);
+    },
+    []
+  );
 
   const updateOrigin = () => {
     const r = cardRef.current?.getBoundingClientRect();
@@ -463,21 +419,26 @@ export default function LoginPage() {
     sig.current.energy = Math.min(1.2, sig.current.energy + 0.22);
   };
 
-  /* 3D tilt + light-following border (mouse only) */
   const onCardMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType !== 'mouse') return;
-    const el = tiltRef.current;
-    const card = cardRef.current;
-    if (!el || !card) return;
-    const r = card.getBoundingClientRect();
-    const x = (e.clientX - r.left) / r.width;
-    const y = (e.clientY - r.top) / r.height;
-    el.style.setProperty('--rx', `${((0.5 - y) * 6).toFixed(2)}deg`);
-    el.style.setProperty('--ry', `${((x - 0.5) * 8).toFixed(2)}deg`);
-    card.style.setProperty('--cx', `${(x * 100).toFixed(1)}%`);
-    card.style.setProperty('--cy', `${(y * 100).toFixed(1)}%`);
+    const cx = e.clientX;
+    const cy = e.clientY;
+    cancelAnimationFrame(tiltRaf.current);
+    tiltRaf.current = requestAnimationFrame(() => {
+      const el = tiltRef.current;
+      const card = cardRef.current;
+      if (!el || !card) return;
+      const r = card.getBoundingClientRect();
+      const x = (cx - r.left) / r.width;
+      const y = (cy - r.top) / r.height;
+      el.style.setProperty('--rx', `${((0.5 - y) * 6).toFixed(2)}deg`);
+      el.style.setProperty('--ry', `${((x - 0.5) * 8).toFixed(2)}deg`);
+      card.style.setProperty('--cx', `${(x * 100).toFixed(1)}%`);
+      card.style.setProperty('--cy', `${(y * 100).toFixed(1)}%`);
+    });
   };
   const onCardLeave = () => {
+    cancelAnimationFrame(tiltRaf.current);
     const el = tiltRef.current;
     if (!el) return;
     el.style.setProperty('--rx', '0deg');
@@ -539,7 +500,6 @@ export default function LoginPage() {
       <div className="cp-vignette" aria-hidden />
 
       <div className="relative z-10 mx-auto grid min-h-screen max-w-7xl grid-cols-1 lg:grid-cols-[1.2fr_1fr]">
-        {/* ------------------------------ Hero (desktop) ------------------------------ */}
         <section className="hidden flex-col justify-center gap-10 px-12 py-14 lg:flex">
           <Brand align="left" />
 
@@ -602,7 +562,6 @@ export default function LoginPage() {
           </div>
         </section>
 
-        {/* ------------------------------ Form ------------------------------ */}
         <section className="flex flex-col items-center justify-center px-5 py-10 sm:px-8">
           <div className="mb-8 w-full max-w-[420px] lg:hidden">
             <Brand align="center" compact />
@@ -732,10 +691,6 @@ export default function LoginPage() {
   );
 }
 
-/* ================================================================== */
-/* Brand block                                                         */
-/* ================================================================== */
-
 function Brand({ align, compact }: { align: 'left' | 'center'; compact?: boolean }) {
   const [i, setI] = useState(0);
   useEffect(() => {
@@ -744,26 +699,20 @@ function Brand({ align, compact }: { align: 'left' | 'center'; compact?: boolean
   }, []);
 
   const center = align === 'center';
-  const size = compact ? 'clamp(3rem, 15vw, 4.4rem)' : 'clamp(4rem, 6.6vw, 6.4rem)';
+  const size = compact ? 'clamp(2.1rem, 9.5vw, 2.9rem)' : 'clamp(2.6rem, 3.8vw, 3.6rem)';
 
   return (
     <div className={center ? 'text-center' : ''}>
       <div className={`cp-rise flex items-center gap-4 ${center ? 'justify-center' : ''}`}>
-        <div className="cp-logo">
-          <span className="cp-logo-ring" />
-          <span className="cp-logo-ring" style={{ animationDelay: '1.1s' }} />
-          <span className="relative z-10">C</span>
+        <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center font-bold text-2xl italic text-white shadow-xl shadow-blue-500/20 -rotate-3">
+          C+
         </div>
         <span className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">
           Lead &amp; Field Operations
         </span>
       </div>
 
-      <h1
-        className="cp-brand mt-6"
-        style={{ fontSize: size }}
-        aria-label="Connect Pro"
-      >
+      <h1 className="cp-brand mt-6" style={{ fontSize: size }} aria-label="Connect Pro">
         <span className="cp-word-wrap" aria-hidden>
           {'Connect'.split('').map((c, k) => (
             <span key={k} className="cp-letter" style={{ animationDelay: `${250 + k * 60}ms` }}>
@@ -779,8 +728,8 @@ function Brand({ align, compact }: { align: 'left' | 'center'; compact?: boolean
       <svg
         className={`cp-wave ${center ? 'mx-auto' : ''}`}
         viewBox="0 0 240 24"
-        width={compact ? 180 : 240}
-        height={compact ? 18 : 24}
+        width={compact ? 140 : 170}
+        height={compact ? 14 : 17}
         fill="none"
         aria-hidden
       >
@@ -793,7 +742,7 @@ function Brand({ align, compact }: { align: 'left' | 'center'; compact?: boolean
         <path
           d="M2 12 Q 12 0 22 12 T 42 12 T 62 12 T 82 12 T 102 12 T 122 12 T 142 12 T 162 12 T 182 12 T 202 12 T 222 12 T 238 12"
           stroke="url(#cpWave)"
-          strokeWidth="2"
+          strokeWidth="2.2"
           strokeLinecap="round"
         />
       </svg>
@@ -810,10 +759,6 @@ function Brand({ align, compact }: { align: 'left' | 'center'; compact?: boolean
     </div>
   );
 }
-
-/* ================================================================== */
-/* Floating-label field                                                */
-/* ================================================================== */
 
 interface FieldProps {
   id: string;
@@ -867,21 +812,16 @@ function Field({
   );
 }
 
-/* ================================================================== */
-/* Styles (scoped by "cp-" prefix)                                     */
-/* ================================================================== */
-
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap');
 
 .cp-root { font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif; }
 
-/* Atmosphere */
-.cp-aurora { position: absolute; border-radius: 9999px; filter: blur(120px); pointer-events: none; z-index: 0; }
-.cp-aurora-a { width: 680px; height: 680px; left: -180px; top: -200px; opacity: .55;
+.cp-aurora { position: absolute; border-radius: 9999px; filter: blur(90px); pointer-events: none; z-index: 0; will-change: transform; }
+.cp-aurora-a { width: 560px; height: 560px; left: -160px; top: -180px; opacity: .55;
   background: radial-gradient(circle at 30% 30%, #4f46e5, transparent 65%);
   animation: cp-drift-a 22s ease-in-out infinite alternate; }
-.cp-aurora-b { width: 620px; height: 620px; right: -180px; bottom: -220px; opacity: .4;
+.cp-aurora-b { width: 520px; height: 520px; right: -160px; bottom: -200px; opacity: .4;
   background: radial-gradient(circle at 60% 60%, #06b6d4, transparent 65%);
   animation: cp-drift-b 28s ease-in-out infinite alternate; }
 .cp-vignette { position: absolute; inset: 0; pointer-events: none; z-index: 1;
@@ -889,43 +829,30 @@ const CSS = `
 @keyframes cp-drift-a { from { transform: translate(0,0); } to { transform: translate(90px, 70px); } }
 @keyframes cp-drift-b { from { transform: translate(0,0); } to { transform: translate(-80px, -60px); } }
 
-/* Entrance */
 .cp-rise { opacity: 0; transform: translateY(16px); animation: cp-rise .9s cubic-bezier(.2,.7,.2,1) forwards; }
 @keyframes cp-rise { to { opacity: 1; transform: translateY(0); } }
 
-/* Logo with signal rings */
-.cp-logo { position: relative; width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center;
-  background: linear-gradient(135deg, #6366f1, #22d3ee); color: #fff; font-family: 'Syne', sans-serif; font-weight: 800; font-size: 20px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,.2) inset, 0 10px 34px -8px rgba(99,102,241,.8); }
-.cp-logo-ring { position: absolute; inset: 0; border-radius: 13px; border: 1px solid rgba(129,140,248,.7);
-  animation: cp-logo-ring 2.2s ease-out infinite; }
-@keyframes cp-logo-ring { from { transform: scale(1); opacity: .8; } to { transform: scale(2.1); opacity: 0; } }
-
-/* Brand wordmark */
-.cp-brand { font-family: 'Syne', sans-serif; font-weight: 800; letter-spacing: -0.035em; line-height: .98; color: #fff;
-  text-shadow: 0 0 60px rgba(99,102,241,.35); perspective: 800px; }
+.cp-brand { font-family: 'Syne', sans-serif; font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: #fff;
+  text-shadow: 0 0 50px rgba(99,102,241,.35); }
 .cp-word-wrap { display: inline-block; }
 .cp-letter { display: inline-block; opacity: 0; transform-origin: 50% 100%;
   animation: cp-letter .95s cubic-bezier(.2,.8,.2,1) forwards; }
-@keyframes cp-letter { from { opacity: 0; transform: translateY(46px) rotateX(-75deg); filter: blur(12px); }
+@keyframes cp-letter { from { opacity: 0; transform: translateY(32px) rotateX(-75deg); filter: blur(10px); }
   to { opacity: 1; transform: none; filter: blur(0); } }
 .cp-pro { background: linear-gradient(100deg, #a5b4fc 5%, #22d3ee 50%, #a5b4fc 95%); background-size: 220% 100%;
   -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none;
   animation: cp-letter .95s cubic-bezier(.2,.8,.2,1) forwards, cp-shimmer 7s linear 1.2s infinite; }
 @keyframes cp-shimmer { to { background-position: -220% 0; } }
 
-.cp-wave { display: block; margin-top: 14px; overflow: visible; filter: drop-shadow(0 0 8px rgba(34,211,238,.55));
-  stroke-dasharray: 520; stroke-dashoffset: 520; animation: cp-wave-draw 1.8s ease .9s forwards; }
+.cp-wave { display: block; margin-top: 12px; overflow: visible; }
 .cp-wave path { stroke-dasharray: 520; stroke-dashoffset: 520; animation: cp-wave-draw 1.8s ease .9s forwards; }
 @keyframes cp-wave-draw { to { stroke-dashoffset: 0; } }
 
 .cp-word { display: inline-block; font-weight: 700; color: #a5f3fc; animation: cp-word-in .6s cubic-bezier(.2,.8,.2,1) both; }
 @keyframes cp-word-in { from { opacity: 0; transform: translateY(10px); filter: blur(4px); } to { opacity: 1; transform: none; filter: blur(0); } }
 
-/* Hero panels */
 .cp-panel { position: relative; border-radius: 18px; border: 1px solid rgba(255,255,255,.09);
-  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
-  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+  background: linear-gradient(180deg, rgba(14,18,40,.7), rgba(10,14,32,.6)); }
 .cp-progress { background: linear-gradient(90deg, #6366f1, #22d3ee); transition: width 1.1s cubic-bezier(.4,0,.2,1); box-shadow: 0 0 12px rgba(99,102,241,.6); }
 .cp-node { width: 15px; height: 15px; border-radius: 9999px; background: #0f172a; border: 1px solid rgba(255,255,255,.18);
   transition: background .5s, border-color .5s, box-shadow .5s; position: relative; }
@@ -940,14 +867,12 @@ const CSS = `
 .cp-tag { flex: none; min-width: 76px; text-align: center; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
   padding: 3px 8px; border-radius: 6px; color: #c7d2fe; background: rgba(99,102,241,.14); border: 1px solid rgba(129,140,248,.25); }
 .cp-feed-fade { position: absolute; left: 0; right: 0; bottom: 0; height: 56px; border-radius: 0 0 18px 18px; pointer-events: none;
-  background: linear-gradient(180deg, transparent, rgba(5,8,22,.85)); }
+  background: linear-gradient(180deg, transparent, rgba(8,12,28,.9)); }
 
-/* Card */
 .cp-tilt { transform: perspective(1000px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .25s ease-out; will-change: transform; }
 .cp-card { position: relative; overflow: hidden; border-radius: 22px; padding: 34px 30px 28px;
   border: 1px solid rgba(255,255,255,.1);
-  background: linear-gradient(180deg, rgba(14,18,40,.72), rgba(10,14,32,.62));
-  -webkit-backdrop-filter: blur(22px) saturate(140%); backdrop-filter: blur(22px) saturate(140%);
+  background: linear-gradient(180deg, rgba(14,18,40,.9), rgba(10,14,32,.86));
   box-shadow: 0 30px 80px -30px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.03) inset; }
 @media (max-width: 420px) { .cp-card { padding: 28px 20px 24px; } }
 .cp-heading { font-family: 'Syne', sans-serif; font-weight: 700; letter-spacing: -0.02em; }
@@ -961,7 +886,6 @@ const CSS = `
   -webkit-mask-composite: xor; mask-composite: exclude; }
 .cp-card:hover .cp-card-glow, .cp-card:focus-within .cp-card-glow { opacity: 1; }
 
-/* Fields */
 .cp-field { position: relative; }
 .cp-field-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #64748b; transition: color .25s; pointer-events: none; }
 .cp-input { width: 100%; height: 54px; padding: 18px 44px 0 42px; border-radius: 13px; font-size: 16px; color: #f1f5f9;
@@ -984,7 +908,6 @@ const CSS = `
 .cp-msg { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .3s ease, opacity .3s ease; }
 .cp-msg.is-open { grid-template-rows: 1fr; opacity: 1; }
 
-/* Button */
 .cp-btn { position: relative; width: 100%; height: 50px; border-radius: 13px; overflow: hidden; font-size: 14.5px; font-weight: 700; color: #fff;
   border: 0; cursor: pointer; transition: transform .2s, box-shadow .3s; margin-top: 6px;
   box-shadow: 0 12px 30px -12px rgba(99,102,241,.8), 0 0 0 1px rgba(255,255,255,.14) inset; }
@@ -1003,10 +926,9 @@ const CSS = `
 .cp-check { animation: cp-pop .45s cubic-bezier(.2,.9,.3,1.3); }
 @keyframes cp-pop { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
-/* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .cp-root *, .cp-root *::before, .cp-root *::after { animation: none !important; transition-duration: .01ms !important; }
   .cp-rise, .cp-letter { opacity: 1; transform: none; filter: none; }
-  .cp-wave, .cp-wave path { stroke-dashoffset: 0; }
+  .cp-wave path { stroke-dashoffset: 0; }
 }
 `;
