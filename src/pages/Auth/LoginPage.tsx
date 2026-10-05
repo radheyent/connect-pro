@@ -491,7 +491,7 @@ export default function LoginPage() {
   });
 
   return (
-    <div className="cp-root relative min-h-screen w-full overflow-hidden bg-[#050816] text-slate-100">
+    <div className="cp-root relative min-h-screen w-full overflow-hidden bg-[#0b1433] text-slate-100">
       <style>{CSS}</style>
 
       <div className="cp-aurora cp-aurora-a" aria-hidden />
@@ -562,7 +562,7 @@ export default function LoginPage() {
           </div>
         </section>
 
-        <section className="flex flex-col items-center justify-center px-5 py-10 sm:px-8">
+        <section className="cp-side flex flex-col items-center justify-center px-5 py-10 sm:px-8">
           <div className="mb-8 w-full max-w-[420px] lg:hidden">
             <Brand align="center" compact />
           </div>
@@ -699,37 +699,37 @@ function Brand({ align, compact }: { align: 'left' | 'center'; compact?: boolean
   }, []);
 
   const center = align === 'center';
-  const size = compact ? 'clamp(2.1rem, 9.5vw, 2.9rem)' : 'clamp(2.6rem, 3.8vw, 3.6rem)';
+  const size = compact ? 'clamp(1.6rem, 7vw, 2rem)' : 'clamp(1.9rem, 2.6vw, 2.4rem)';
 
   return (
     <div className={center ? 'text-center' : ''}>
-      <div className={`cp-rise flex items-center gap-4 ${center ? 'justify-center' : ''}`}>
-        <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center font-bold text-2xl italic text-white shadow-xl shadow-blue-500/20 -rotate-3">
+      <div className={`cp-rise flex items-center gap-3.5 ${center ? 'justify-center' : ''}`}>
+        <div className="w-12 h-12 shrink-0 bg-blue-600 rounded-2xl flex items-center justify-center font-bold text-xl italic text-white shadow-xl shadow-blue-500/20 -rotate-3">
           C+
         </div>
-        <span className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">
-          Lead &amp; Field Operations
-        </span>
+        <h1 className="cp-brand" style={{ fontSize: size }} aria-label="Connect Pro">
+          <span className="cp-word-wrap" aria-hidden>
+            {'Connect'.split('').map((c, k) => (
+              <span key={k} className="cp-letter" style={{ animationDelay: `${250 + k * 60}ms` }}>
+                {c}
+              </span>
+            ))}
+          </span>{' '}
+          <span className="cp-pro cp-letter" style={{ animationDelay: '720ms' }} aria-hidden>
+            Pro
+          </span>
+        </h1>
       </div>
 
-      <h1 className="cp-brand mt-6" style={{ fontSize: size }} aria-label="Connect Pro">
-        <span className="cp-word-wrap" aria-hidden>
-          {'Connect'.split('').map((c, k) => (
-            <span key={k} className="cp-letter" style={{ animationDelay: `${250 + k * 60}ms` }}>
-              {c}
-            </span>
-          ))}
-        </span>{' '}
-        <span className="cp-pro cp-letter" style={{ animationDelay: '720ms' }} aria-hidden>
-          Pro
-        </span>
-      </h1>
+      <p className="cp-rise mt-3 text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400" style={{ animationDelay: '500ms' }}>
+        Lead &amp; Field Operations
+      </p>
 
       <svg
         className={`cp-wave ${center ? 'mx-auto' : ''}`}
         viewBox="0 0 240 24"
-        width={compact ? 140 : 170}
-        height={compact ? 14 : 17}
+        width={compact ? 120 : 140}
+        height={compact ? 12 : 14}
         fill="none"
         aria-hidden
       >
@@ -813,27 +813,27 @@ function Field({
 }
 
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap');
 
 .cp-root { font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif; }
 
 .cp-aurora { position: absolute; border-radius: 9999px; filter: blur(90px); pointer-events: none; z-index: 0; will-change: transform; }
-.cp-aurora-a { width: 560px; height: 560px; left: -160px; top: -180px; opacity: .55;
+.cp-aurora-a { width: 560px; height: 560px; left: -160px; top: -180px; opacity: .85;
   background: radial-gradient(circle at 30% 30%, #4f46e5, transparent 65%);
   animation: cp-drift-a 22s ease-in-out infinite alternate; }
-.cp-aurora-b { width: 520px; height: 520px; right: -160px; bottom: -200px; opacity: .4;
+.cp-aurora-b { width: 520px; height: 520px; right: -160px; bottom: -200px; opacity: .65;
   background: radial-gradient(circle at 60% 60%, #06b6d4, transparent 65%);
   animation: cp-drift-b 28s ease-in-out infinite alternate; }
 .cp-vignette { position: absolute; inset: 0; pointer-events: none; z-index: 1;
-  background: radial-gradient(ellipse at center, transparent 50%, rgba(2,4,14,.7) 100%); }
+  background: radial-gradient(ellipse at center, transparent 60%, rgba(5,10,30,.28) 100%); }
 @keyframes cp-drift-a { from { transform: translate(0,0); } to { transform: translate(90px, 70px); } }
 @keyframes cp-drift-b { from { transform: translate(0,0); } to { transform: translate(-80px, -60px); } }
 
 .cp-rise { opacity: 0; transform: translateY(16px); animation: cp-rise .9s cubic-bezier(.2,.7,.2,1) forwards; }
 @keyframes cp-rise { to { opacity: 1; transform: translateY(0); } }
 
-.cp-brand { font-family: 'Syne', sans-serif; font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: #fff;
-  text-shadow: 0 0 50px rgba(99,102,241,.35); }
+.cp-brand { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 800; letter-spacing: -0.02em; line-height: 1; color: #fff;
+  text-shadow: 0 0 40px rgba(99,102,241,.3); }
 .cp-word-wrap { display: inline-block; }
 .cp-letter { display: inline-block; opacity: 0; transform-origin: 50% 100%;
   animation: cp-letter .95s cubic-bezier(.2,.8,.2,1) forwards; }
@@ -871,11 +871,12 @@ const CSS = `
 
 .cp-tilt { transform: perspective(1000px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .25s ease-out; will-change: transform; }
 .cp-card { position: relative; overflow: hidden; border-radius: 22px; padding: 34px 30px 28px;
-  border: 1px solid rgba(255,255,255,.1);
-  background: linear-gradient(180deg, rgba(14,18,40,.9), rgba(10,14,32,.86));
-  box-shadow: 0 30px 80px -30px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.03) inset; }
+  border: 1px solid rgba(255,255,255,.2);
+  background: linear-gradient(180deg, rgba(255,255,255,.13), rgba(255,255,255,.05));
+  -webkit-backdrop-filter: blur(16px) saturate(150%); backdrop-filter: blur(16px) saturate(150%);
+  box-shadow: 0 30px 80px -30px rgba(2,6,23,.7), 0 0 70px -20px rgba(99,102,241,.5), 0 1px 0 rgba(255,255,255,.25) inset; }
 @media (max-width: 420px) { .cp-card { padding: 28px 20px 24px; } }
-.cp-heading { font-family: 'Syne', sans-serif; font-weight: 700; letter-spacing: -0.02em; }
+.cp-heading { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 700; letter-spacing: -0.02em; }
 .cp-card-sheen { position: absolute; left: 0; right: 0; top: 0; height: 1px;
   background: linear-gradient(90deg, transparent, rgba(165,180,252,.9), rgba(103,232,249,.9), transparent);
   background-size: 200% 100%; animation: cp-sheen 6s linear infinite; opacity: .85; }
@@ -886,6 +887,11 @@ const CSS = `
   -webkit-mask-composite: xor; mask-composite: exclude; }
 .cp-card:hover .cp-card-glow, .cp-card:focus-within .cp-card-glow { opacity: 1; }
 
+.cp-side { position: relative; }
+@media (min-width: 1024px) {
+  .cp-side { background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.015));
+    border-left: 1px solid rgba(255,255,255,.12); box-shadow: 60px 0 100px -60px rgba(99,102,241,.35) inset; }
+}
 .cp-field { position: relative; }
 .cp-field-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #64748b; transition: color .25s; pointer-events: none; }
 .cp-input { width: 100%; height: 54px; padding: 18px 44px 0 42px; border-radius: 13px; font-size: 16px; color: #f1f5f9;
