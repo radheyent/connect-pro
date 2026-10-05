@@ -232,6 +232,7 @@ const EmployeeLeadsPage: React.FC = () => {
       `${numberLines}\n` +
       `💰 Any Charge: ${waData.anyCharge}\n` +
       (waData.note ? `📝 Notes: ${waData.note}\n` : '') +
+      (activeLead.location_link ? `📍 Location: ${activeLead.location_link}\n` : '') +
       `━━━━━━━━━━━━━━━━━━━━\n` +
       `👨‍💼 Employee: ${profile.name}`;
 
