@@ -7,7 +7,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import {
   LayoutDashboard, Users, Share2, PhoneMissed,
   BarChart3, Database, LogOut, Menu, Sun, Moon,
-  Bell, Wallet, Car, Receipt, ExternalLink, Truck, BookOpenText, IndianRupee, ChevronDown, CalendarClock
+  Bell, Wallet, Car, Receipt, ExternalLink, Truck, BookOpenText, IndianRupee, ChevronDown, CalendarClock,
+  CalendarCheck, FileText, FolderOpen
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -29,6 +30,9 @@ const PAGE_TITLES: Record<string, string> = {
   '/employee':                'My Dashboard',
   '/employee/leads':          'My Leads',
   '/employee/expenses':       'My Expenses',
+  '/employee/attendance':     'My Attendance',
+  '/employee/salary':         'My Salary Slips',
+  '/employee/documents':      'My Documents',
   '/field-boy':               'Field Closure Desk',
   '/field-boy/conveyance':    'My Conveyance',
   '/announcements':           'Announcements',
@@ -116,11 +120,14 @@ const DashboardLayout: React.FC = () => {
       // ── Employee ──
       { name: 'My Leads',       path: '/employee/leads',     icon: Users,           roles: ['employee'] },
       { name: 'My Expenses',    path: '/employee/expenses',  icon: Receipt,         roles: ['employee'] },
+      { name: 'My Attendance',  path: '/employee/attendance', icon: CalendarCheck,  roles: ['employee'] },
+      { name: 'My Salary',      path: '/employee/salary',    icon: FileText,        roles: ['employee'] },
+      { name: 'My Documents',   path: '/employee/documents', icon: FolderOpen,      roles: ['employee'] },
       // ── Field Boy ──
       { name: 'My Conveyance',  path: '/field-boy/conveyance', icon: Car,           roles: ['field_boy'] },
       // ── Shared ──
       { name: 'Announcements',  path: '/announcements',      icon: Bell,            roles: ['admin','employee','field_boy'] },
-      { name: 'Attendance',     path: 'external',            url: 'https://script.google.com/macros/s/AKfycbyRxMMBPeEOPWHBi4rWSQ_tneLOxgltRsnP6aCwSp34-zsHx-XWQtfMHoatY7RdZwX3/exec', icon: ExternalLink, roles: ['admin','employee'] },
+      { name: 'Attendance',     path: 'external',            url: 'https://script.google.com/macros/s/AKfycbyRxMMBPeEOPWHBi4rWSQ_tneLOxgltRsnP6aCwSp34-zsHx-XWQtfMHoatY7RdZwX3/exec', icon: ExternalLink, roles: ['admin'] },
     ];
 
     return all.filter(item => item.roles.includes(role));

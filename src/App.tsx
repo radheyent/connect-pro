@@ -17,6 +17,9 @@ import LedgerPage from './pages/Admin/LedgerPage';
 import BudgetPage from './pages/Admin/BudgetPage';
 import EmployeeLeadsPage from './pages/Employee/EmployeeLeadsPage';
 import EmployeeExpensesPage from './pages/Employee/EmployeeExpensesPage';
+import MyAttendancePage from './pages/Employee/MyAttendancePage';
+import MySalaryPage from './pages/Employee/MySalaryPage';
+import MyDocumentsPage from './pages/Employee/MyDocumentsPage';
 import AnnouncementsPage from './pages/AnnouncementsPage';
 import MyConveyancePage from './pages/FieldBoy/MyConveyancePage';
 import DashboardLayout from './components/layout/DashboardLayout';
@@ -137,6 +140,9 @@ function App() {
               <Route index            element={<EmployeeDashboard />} />
               <Route path="leads"     element={<EmployeeLeadsPage />} />
               <Route path="expenses"  element={<EmployeeExpensesPage />} />
+              <Route path="attendance" element={<MyAttendancePage />} />
+              <Route path="salary"     element={<MySalaryPage />} />
+              <Route path="documents"  element={<MyDocumentsPage />} />
             </Route>
 
             {/* ── Field Boy routes ── */}
