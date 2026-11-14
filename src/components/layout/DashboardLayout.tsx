@@ -23,6 +23,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/admin/fake-calls':        'Fake Calls',
   '/admin/reports':           'Reports',
   '/admin/backup':            'Backup & Reset',
+  '/admin/attendance':        'Attendance',
   '/admin/expenses/store':     'Store Expenses',
   '/admin/expenses/field':     'Field Expenses',
   '/admin/expenses/ledger':    'Ledger',
@@ -106,6 +107,7 @@ const DashboardLayout: React.FC = () => {
       // ── Admin ──
       { name: 'Dashboard',      path: dashPath,              icon: LayoutDashboard, roles: ['admin','employee','field_boy'] },
       { name: 'Employees',      path: '/admin/employees',    icon: Users,           roles: ['admin'] },
+      { name: 'Attendance',     path: '/admin/attendance',   icon: CalendarCheck,   roles: ['admin'] },
       { name: 'All Leads',      path: '/admin/leads',        icon: Share2,          roles: ['admin'] },
       { name: 'Follow-ups',     path: '/admin/followups',    icon: CalendarClock,   roles: ['admin'] },
       { name: 'Fake Calls',     path: '/admin/fake-calls',   icon: PhoneMissed,     roles: ['admin'] },
@@ -127,7 +129,6 @@ const DashboardLayout: React.FC = () => {
       { name: 'My Conveyance',  path: '/field-boy/conveyance', icon: Car,           roles: ['field_boy'] },
       // ── Shared ──
       { name: 'Announcements',  path: '/announcements',      icon: Bell,            roles: ['admin','employee','field_boy'] },
-      { name: 'Attendance',     path: 'external',            url: 'https://script.google.com/macros/s/AKfycbyRxMMBPeEOPWHBi4rWSQ_tneLOxgltRsnP6aCwSp34-zsHx-XWQtfMHoatY7RdZwX3/exec', icon: ExternalLink, roles: ['admin'] },
     ];
 
     return all.filter(item => item.roles.includes(role));
