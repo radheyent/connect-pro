@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, Share2, PhoneMissed,
   BarChart3, Database, LogOut, Menu, Sun, Moon,
   Bell, Wallet, Car, Receipt, ExternalLink, Truck, BookOpenText, IndianRupee, ChevronDown, CalendarClock,
-  CalendarCheck, FileText, FolderOpen
+  CalendarCheck, FileText, FolderOpen, IdCard
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -35,6 +35,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/employee/attendance':     'My Attendance',
   '/employee/salary':         'My Salary Slips',
   '/employee/documents':      'My Documents',
+  '/employee/profile':        'My Profile',
   '/field-boy':               'Field Closure Desk',
   '/field-boy/conveyance':    'My Conveyance',
   '/announcements':           'Announcements',
@@ -127,6 +128,7 @@ const DashboardLayout: React.FC = () => {
       { name: 'My Attendance',  path: '/employee/attendance', icon: CalendarCheck,  roles: ['employee'] },
       { name: 'My Salary',      path: '/employee/salary',    icon: FileText,        roles: ['employee'] },
       { name: 'My Documents',   path: '/employee/documents', icon: FolderOpen,      roles: ['employee'] },
+      { name: 'My Profile',     path: '/employee/profile',   icon: IdCard,          roles: ['employee'] },
       // ── Field Boy ──
       { name: 'My Conveyance',  path: '/field-boy/conveyance', icon: Car,           roles: ['field_boy'] },
       // ── Shared ──

@@ -22,6 +22,7 @@ import EmployeeExpensesPage from './pages/Employee/EmployeeExpensesPage';
 import MyAttendancePage from './pages/Employee/MyAttendancePage';
 import MySalaryPage from './pages/Employee/MySalaryPage';
 import MyDocumentsPage from './pages/Employee/MyDocumentsPage';
+import MyProfilePage from './pages/Employee/MyProfilePage';
 import AnnouncementsPage from './pages/AnnouncementsPage';
 import MyConveyancePage from './pages/FieldBoy/MyConveyancePage';
 import DashboardLayout from './components/layout/DashboardLayout';
@@ -147,6 +148,7 @@ function App() {
               <Route path="attendance" element={<MyAttendancePage />} />
               <Route path="salary"     element={<MySalaryPage />} />
               <Route path="documents"  element={<MyDocumentsPage />} />
+              <Route path="profile"    element={<MyProfilePage />} />
             </Route>
 
             {/* ── Field Boy routes ── */}
