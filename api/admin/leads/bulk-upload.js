@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { requireAdmin } from '../../_lib/requireAdmin.js';
 import * as XLSX from 'xlsx';
 import formidable from 'formidable';
 import fs from 'fs';
@@ -6,15 +6,11 @@ import fs from 'fs';
 export const config = { api: { bodyParser: false } };
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const supabaseAdmin = createClient(
-    process.env.VITE_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  );
+  const ctx = await requireAdmin(req, res);
+  if (!ctx) return;
+  const supabaseAdmin = ctx.admin;
 
   try {
     const form = formidable({ maxFileSize: 10 * 1024 * 1024 });
@@ -38,7 +34,7 @@ export default async function handler(req, res) {
       const wb = XLSX.read(buffer, { type: 'buffer' });
       rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
     } else {
-      return res.status(400).json({ error: 'Sirf CSV ya Excel (.xlsx/.xls) upload karo' });
+      return res.status(400).json({ error: 'Only CSV or Excel (.xlsx/.xls) files are supported' });
     }
 
     const mappedLeads = rows.map(l => ({
@@ -53,7 +49,7 @@ export default async function handler(req, res) {
     })).filter(l => l.name && l.phone);
 
     if (mappedLeads.length === 0)
-      return res.status(400).json({ error: 'File mein koi valid lead nahi mili. Name aur Phone column check karo.' });
+      return res.status(400).json({ error: 'No valid leads found in the file. Check the Name and Phone columns.' });
 
     const { error } = await supabaseAdmin.from('leads').insert(mappedLeads);
     if (error) throw error;

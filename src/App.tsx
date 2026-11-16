@@ -16,6 +16,7 @@ import FieldExpensesPage from './pages/Admin/FieldExpensesPage';
 import LedgerPage from './pages/Admin/LedgerPage';
 import BudgetPage from './pages/Admin/BudgetPage';
 import AdminAttendancePage from './pages/Admin/AdminAttendancePage';
+import AdminPayrollPage from './pages/Admin/AdminPayrollPage';
 import EmployeeLeadsPage from './pages/Employee/EmployeeLeadsPage';
 import EmployeeExpensesPage from './pages/Employee/EmployeeExpensesPage';
 import MyAttendancePage from './pages/Employee/MyAttendancePage';
@@ -123,6 +124,7 @@ function App() {
               <Route path="reports"    element={<ReportsPage />} />
               <Route path="backup"     element={<BackupPage />} />
               <Route path="attendance" element={<AdminAttendancePage />} />
+              <Route path="payroll"    element={<AdminPayrollPage />} />
               <Route path="expenses/store" element={<StoreExpensesPage />} />
               <Route path="expenses/field" element={<FieldExpensesPage />} />
               <Route path="expenses/ledger" element={<LedgerPage />} />

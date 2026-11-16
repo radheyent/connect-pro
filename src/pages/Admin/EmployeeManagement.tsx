@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase, UserProfile } from '@/lib/supabase';
+import { adminFetch } from '@/lib/adminApi';
 import {
   Table,
   TableBody,
@@ -67,7 +68,7 @@ const EmployeeManagement: React.FC = () => {
         return;
       }
 
-      const res = await fetch('/api/admin/employees/list');
+      const res = await adminFetch('/api/admin/employees/list');
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Load failed');
       setEmployees(result.employees || []);
@@ -88,7 +89,7 @@ const EmployeeManagement: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch('/api/admin/employees/create', {
+      const res = await adminFetch('/api/admin/employees/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
@@ -130,7 +131,7 @@ const EmployeeManagement: React.FC = () => {
     if (!editTarget) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/admin/employees/update', {
+      const res = await adminFetch('/api/admin/employees/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -158,7 +159,7 @@ const EmployeeManagement: React.FC = () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const res = await fetch('/api/admin/employees/delete', {
+      const res = await adminFetch('/api/admin/employees/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: deleteTarget.id }),

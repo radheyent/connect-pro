@@ -1,20 +1,25 @@
-import { createClient } from '@supabase/supabase-js';
+import { requireAdmin } from '../../_lib/requireAdmin.js';
+
+const ALLOWED_ROLES = ['admin', 'employee', 'field_boy'];
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const supabaseAdmin = createClient(
-    process.env.VITE_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  );
+  const ctx = await requireAdmin(req, res);
+  if (!ctx) return;
+  const supabaseAdmin = ctx.admin;
 
   try {
-    const { id, name, role, email, password } = req.body;
-    if (!id) return res.status(400).json({ error: 'Employee id required hai' });
+    const { id, name, role, email, password } = req.body || {};
+    if (!id) return res.status(400).json({ error: 'Employee id is required' });
+
+    if (role && !ALLOWED_ROLES.includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+    // Prevent an admin from locking themselves out by removing their own admin role
+    if (id === ctx.user.id && role && role !== 'admin') {
+      return res.status(400).json({ error: 'You cannot remove your own admin role' });
+    }
 
     // Update profile fields (name/role) if provided
     const profileUpdate = {};
@@ -40,6 +45,6 @@ export default async function handler(req, res) {
     res.status(200).json({ success: true });
   } catch (error) {
     console.error('Employee update error:', error);
-    res.status(400).json({ error: error.message || 'Update fail ho gaya' });
+    res.status(400).json({ error: error.message || 'Update failed' });
   }
 }

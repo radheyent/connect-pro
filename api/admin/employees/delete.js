@@ -1,20 +1,18 @@
-import { createClient } from '@supabase/supabase-js';
+import { requireAdmin } from '../../_lib/requireAdmin.js';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const supabaseAdmin = createClient(
-    process.env.VITE_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  );
+  const ctx = await requireAdmin(req, res);
+  if (!ctx) return;
+  const supabaseAdmin = ctx.admin;
 
   try {
-    const { id } = req.body;
-    if (!id) return res.status(400).json({ error: 'Employee id required hai' });
+    const { id } = req.body || {};
+    if (!id) return res.status(400).json({ error: 'Employee id is required' });
+    if (id === ctx.user.id) {
+      return res.status(400).json({ error: 'You cannot delete your own account' });
+    }
 
     // Delete profile row first (in case of FK constraints), then the auth user
     const { error: profileError } = await supabaseAdmin
@@ -29,6 +27,6 @@ export default async function handler(req, res) {
     res.status(200).json({ success: true });
   } catch (error) {
     console.error('Employee delete error:', error);
-    res.status(400).json({ error: error.message || 'Delete fail ho gaya' });
+    res.status(400).json({ error: error.message || 'Delete failed' });
   }
 }
