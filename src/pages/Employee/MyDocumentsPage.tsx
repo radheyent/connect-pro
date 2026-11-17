@@ -42,7 +42,7 @@ const MyDocumentsPage: React.FC = () => {
       .select('id, doc_type, file_name, file_url, storage_path, created_at')
       .eq('emp_id', userId)
       .order('created_at', { ascending: false });
-    if (error) toast.error(error.message || 'Documents load nahi ho paaye');
+    if (error) toast.error(error.message || 'Could not load documents');
     else setDocs((data as DocRow[]) ?? []);
     setLoading(false);
   }, [userId]);
@@ -67,12 +67,12 @@ const MyDocumentsPage: React.FC = () => {
       } else {
         url = d.file_url;
       }
-      if (!url) throw new Error('File ka link nahi mila');
+      if (!url) throw new Error('No link found for this file');
       if (w) w.location.href = url;
       else window.location.href = url;
     } catch (e: any) {
       if (w) w.close();
-      toast.error(e?.message || 'Document khul nahi paaya');
+      toast.error(e?.message || 'Could not open the document');
     } finally {
       setOpening(null);
     }
@@ -82,7 +82,7 @@ const MyDocumentsPage: React.FC = () => {
     <div className="mx-auto w-full max-w-3xl space-y-4">
       <div className="flex items-center gap-2">
         <FolderOpen className="h-5 w-5 text-blue-600" />
-        <h2 className="text-lg font-bold">Mere Documents</h2>
+        <h2 className="text-lg font-bold">My Documents</h2>
       </div>
 
       {loading ? (
@@ -104,7 +104,7 @@ const MyDocumentsPage: React.FC = () => {
               <CardContent className="space-y-2">
                 {list.length === 0 ? (
                   <p className="text-sm text-slate-500">
-                    Abhi upload nahi hua. Zarurat ho to admin se kahein.
+                    Nothing uploaded yet. Ask your admin if you need it.
                   </p>
                 ) : (
                   list.map(d => (
@@ -128,7 +128,7 @@ const MyDocumentsPage: React.FC = () => {
                         ) : (
                           <ExternalLink className="h-3.5 w-3.5" />
                         )}
-                        Kholein
+                        Open
                       </Button>
                     </div>
                   ))

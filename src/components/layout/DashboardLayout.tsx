@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, Share2, PhoneMissed,
   BarChart3, Database, LogOut, Menu, Sun, Moon,
   Bell, Wallet, Car, Receipt, ExternalLink, Truck, BookOpenText, IndianRupee, ChevronDown, CalendarClock,
-  CalendarCheck, FileText, FolderOpen, IdCard
+  CalendarCheck, FileText, FolderOpen, IdCard, Archive
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -25,6 +25,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/admin/backup':            'Backup & Reset',
   '/admin/attendance':        'Attendance',
   '/admin/payroll':           'Payroll',
+  '/admin/hr-backup':         'HR & Attendance Backup',
   '/admin/expenses/store':     'Store Expenses',
   '/admin/expenses/field':     'Field Expenses',
   '/admin/expenses/ledger':    'Ledger',
@@ -111,6 +112,7 @@ const DashboardLayout: React.FC = () => {
       { name: 'Employees',      path: '/admin/employees',    icon: Users,           roles: ['admin'] },
       { name: 'Attendance',     path: '/admin/attendance',   icon: CalendarCheck,   roles: ['admin'] },
       { name: 'Payroll',        path: '/admin/payroll',      icon: IndianRupee,     roles: ['admin'] },
+      { name: 'HR Backup',      path: '/admin/hr-backup',    icon: Archive,         roles: ['admin'] },
       { name: 'All Leads',      path: '/admin/leads',        icon: Share2,          roles: ['admin'] },
       { name: 'Follow-ups',     path: '/admin/followups',    icon: CalendarClock,   roles: ['admin'] },
       { name: 'Fake Calls',     path: '/admin/fake-calls',   icon: PhoneMissed,     roles: ['admin'] },

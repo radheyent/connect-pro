@@ -29,8 +29,7 @@ const RESET_TABLES: Array<{ name: string; label: string }> = [
 // Tables always preserved
 const PRESERVE_LABELS = [
   'User Profiles (employees, admins, field boys)',
-  'Attendance, incentives, salary slips, salaries and employee details',
-  'Uploaded employee documents (stored in Supabase Storage, not inside the Excel backup)',
+  'HR data (attendance, salaries, slips, documents) - backed up separately in HR & Attendance Backup',
   'App Settings (km rate, etc.)',
   'Announcements',
 ];
@@ -135,30 +134,6 @@ const BackupPage: React.FC = () => {
       const al = await fetchTable('archived_leads');
       addSheet(wb, al, 'Archived Leads');
 
-      addLog('Fetching employees…');
-      const profiles = await fetchTable('user_profiles');
-      addSheet(wb, profiles, 'Employees');
-
-      addLog('Fetching employee details…');
-      addSheet(wb, await fetchTable('employee_details'), 'Employee Details');
-
-      addLog('Fetching salaries…');
-      addSheet(wb, await fetchTable('employee_payroll'), 'Salaries');
-
-      addLog('Fetching attendance…');
-      const attendance = await fetchTable('attendance');
-      addSheet(wb, attendance, 'Attendance');
-
-      addLog('Fetching incentives…');
-      addSheet(wb, await fetchTable('incentives'), 'Incentives');
-
-      addLog('Fetching salary slips…');
-      const slips = await fetchTable('salary_slips');
-      addSheet(wb, slips, 'Salary Slips');
-
-      addLog('Fetching document records…');
-      addSheet(wb, await fetchTable('employee_documents'), 'Documents');
-
       addLog('Building ledger…');
       // All ledger rows: expense always negative value, credit always positive
       const ledgerRows = [
@@ -225,8 +200,6 @@ const BackupPage: React.FC = () => {
         { Metric: 'Office Expenses',       Value: oe.length },
         { Metric: 'Employee Expenses',     Value: ee.length },
         { Metric: 'Admin Credits',         Value: ac.length },
-        { Metric: 'Attendance Records',    Value: attendance.length },
-        { Metric: 'Salary Slips',          Value: slips.length },
         { Metric: 'Backup Generated At',   Value: new Date().toLocaleString('en-IN') },
       ], 'Summary');
 

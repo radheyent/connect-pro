@@ -95,11 +95,11 @@ const monthLabel = (m: string): string =>
     year: 'numeric',
   });
 
-/** Last 12 months (including this one) as YYYY-MM, newest first */
-const lastTwelveMonths = (today: string): string[] => {
+/** Only the current and the previous month are kept in the database (YYYY-MM, newest first) */
+const keptMonths = (today: string): string[] => {
   const [y, m] = today.split('-').map(Number);
   const out: string[] = [];
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 2; i++) {
     const d = new Date(Date.UTC(y, m - 1 - i, 1));
     out.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`);
   }
@@ -201,12 +201,13 @@ const MyAttendancePage: React.FC = () => {
 
   const [now, setNow] = useState<Date>(() => new Date());
   const todayStr = useMemo(() => istToday(), [now]); // eslint-disable-line react-hooks/exhaustive-deps
-  const months = useMemo(() => lastTwelveMonths(todayStr), [todayStr]);
+  const months = useMemo(() => keptMonths(todayStr), [todayStr]);
 
   const [month, setMonth] = useState<string>(() => monthOf(istToday()));
   const [rows, setRows] = useState<AttendanceRow[]>([]);
   const [summary, setSummary] = useState<MonthSummary | null>(null);
   const [today, setToday] = useState<AttendanceRow | null>(null);
+  const [missedDates, setMissedDates] = useState<string[]>([]);
   const [loadingMonth, setLoadingMonth] = useState(true);
   const [loadingToday, setLoadingToday] = useState(true);
   const [acting, setActing] = useState<'in' | 'out' | null>(null);
@@ -228,9 +229,22 @@ const MyAttendancePage: React.FC = () => {
       .eq('date', istToday())
       .maybeSingle();
     if (error) {
-      toast.error(error.message || 'Aaj ki attendance load nahi ho paayi');
+      toast.error(error.message || "Could not load today's attendance");
     } else {
       setToday((data as AttendanceRow) ?? null);
+    }
+    // Earlier days where the employee checked in but never checked out
+    const missed = await supabase
+      .from('attendance')
+      .select('date')
+      .eq('emp_id', userId)
+      .not('check_in_at', 'is', null)
+      .is('check_out_at', null)
+      .lt('date', istToday())
+      .order('date', { ascending: false })
+      .limit(5);
+    if (!missed.error) {
+      setMissedDates(((missed.data as Array<{ date: string }>) ?? []).map(r => r.date));
     }
     setLoadingToday(false);
   }, [userId]);
@@ -258,7 +272,7 @@ const MyAttendancePage: React.FC = () => {
         setSummary(((sumRes.data as MonthSummary[]) ?? [])[0] ?? null);
       } catch (e: any) {
         if (req === monthReq.current) {
-          toast.error(e?.message || 'Attendance load nahi ho paayi');
+          toast.error(e?.message || 'Could not load attendance');
         }
       } finally {
         if (req === monthReq.current) setLoadingMonth(false);
@@ -286,9 +300,9 @@ const MyAttendancePage: React.FC = () => {
     const { error } = await supabase.rpc('attendance_check_in');
     setActing(null);
     if (error) {
-      toast.error(error.message || 'Check-in nahi ho paaya');
+      toast.error(error.message || 'Could not check in');
     } else {
-      toast.success('Check-in ho gaya ✅');
+      toast.success('Checked in ✅');
     }
     await refreshAll();
   };
@@ -299,9 +313,9 @@ const MyAttendancePage: React.FC = () => {
     const { error } = await supabase.rpc('attendance_check_out');
     setActing(null);
     if (error) {
-      toast.error(error.message || 'Check-out nahi ho paaya');
+      toast.error(error.message || 'Could not check out');
     } else {
-      toast.success('Check-out ho gaya ✅');
+      toast.success('Checked out ✅');
     }
     await refreshAll();
   };
@@ -351,13 +365,20 @@ const MyAttendancePage: React.FC = () => {
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-5">
+      {missedDates.length > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+          You did not check out on {missedDates.map(d => dayLabel(d)).join(', ')}. Please tell your admin so the correct
+          out time can be added.
+        </div>
+      )}
+
       {/* ── Today ─────────────────────────────────────────────────────────── */}
       <Card className="overflow-hidden">
         <CardHeader className="pb-2">
           <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base sm:text-lg">
             <span className="flex items-center gap-2">
               <CalendarCheck className="h-5 w-5 text-blue-600" />
-              Aaj ki Attendance
+              Today's Attendance
             </span>
             <span className="flex items-center gap-1.5 text-sm font-medium text-slate-500 dark:text-slate-400">
               <Clock className="h-4 w-4" />
@@ -373,9 +394,9 @@ const MyAttendancePage: React.FC = () => {
           ) : todayState === 'none' ? (
             <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="font-semibold">Aaj ki attendance abhi mark nahi hui</p>
+                <p className="font-semibold">Your attendance is not marked yet today</p>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Kaam shuru karte hi Check In dabayein. Time server se apne aap lagega.
+                  Press Check In when you start work. The time is recorded automatically by the server.
                 </p>
               </div>
               <Button
@@ -395,7 +416,7 @@ const MyAttendancePage: React.FC = () => {
                   Check-in: <span className="font-semibold">{inTimeOf(td)}</span>
                 </p>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Jaate waqt Check Out zaroor dabayein.
+                  Remember to press Check Out when you leave.
                 </p>
               </div>
               <Button
@@ -415,16 +436,16 @@ const MyAttendancePage: React.FC = () => {
                 {'  •  '}
                 Check-out: <span className="font-semibold">{outTimeOf(td)}</span>
                 {'  •  '}
-                Kaam ke ghante: <span className="font-semibold">{workedOf(td)}</span>
+                Hours worked: <span className="font-semibold">{workedOf(td)}</span>
               </p>
-              <p className="text-sm text-green-700 dark:text-green-400">Aaj ka din poora hua. ✅</p>
+              <p className="text-sm text-green-700 dark:text-green-400">Your day is complete. ✅</p>
             </div>
           ) : (
             <div className="space-y-1">
               <StatusBadge status={td.status} />
               {todayState === 'admin' && (
                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Ye attendance admin ne mark ki hai.
+                  This attendance was marked by the admin.
                   {td.remarks ? ` Remarks: ${td.remarks}` : ''}
                 </p>
               )}
@@ -435,7 +456,7 @@ const MyAttendancePage: React.FC = () => {
 
       {/* ── Month picker + summary ────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-bold">Mahine ka Summary</h2>
+        <h2 className="text-lg font-bold">Monthly Summary</h2>
         <div className="flex items-center gap-2">
           {bonusEligible && (
             <Badge className="gap-1 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
@@ -532,7 +553,7 @@ const MyAttendancePage: React.FC = () => {
       {/* ── Records ───────────────────────────────────────────────────────── */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Meri Attendance — {monthLabel(month)}</CardTitle>
+          <CardTitle className="text-base">My Attendance — {monthLabel(month)}</CardTitle>
         </CardHeader>
         <CardContent className="px-0 sm:px-6">
           <div className="overflow-x-auto">
@@ -551,7 +572,7 @@ const MyAttendancePage: React.FC = () => {
                 {rows.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="py-8 text-center text-slate-500">
-                      {loadingMonth ? 'Load ho raha hai…' : 'Is mahine koi attendance record nahi hai.'}
+                      {loadingMonth ? 'Loading…' : 'There are no attendance records for this month.'}
                     </TableCell>
                   </TableRow>
                 ) : (

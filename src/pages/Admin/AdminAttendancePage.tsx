@@ -11,7 +11,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import {
-  CalendarCheck, RefreshCw, Pencil, Trash2, Plus, Download, Loader2, Users,
+  CalendarCheck, RefreshCw, Pencil, Trash2, Plus, Download, Loader2, Users, Wand2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -63,7 +63,14 @@ interface DialogState {
   row?: AttRow;
 }
 
-type Tab = 'live' | 'mark' | 'records' | 'summary';
+interface BulkLine {
+  status: Status;
+  inT: string;
+  outT: string;
+  remarks: string;
+}
+
+type Tab = 'live' | 'mark' | 'fix' | 'records' | 'summary';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Constants + helpers  (all dates are India dates, same as the database)
@@ -84,20 +91,21 @@ const STATUSES = Object.keys(STATUS_META) as Status[];
 const SELECT_CLS =
   'h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900';
 const INPUT_CLS = SELECT_CLS;
+const CELL_INPUT_CLS =
+  'h-8 rounded-md border border-slate-300 bg-white px-2 text-sm disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900';
 
 const istToday = (): string => new Date().toLocaleDateString('en-CA', { timeZone: IST });
 
 const monthLabel = (m: string): string =>
   new Date(`${m}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
-const lastTwelveMonths = (today: string): string[] => {
+/** Only the current and the previous month are kept in the database */
+const keptMonths = (today: string): string[] => {
   const [y, m] = today.split('-').map(Number);
-  const out: string[] = [];
-  for (let i = 0; i < 12; i++) {
+  return [0, 1].map(i => {
     const d = new Date(Date.UTC(y, m - 1 - i, 1));
-    out.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`);
-  }
-  return out;
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  });
 };
 
 const monthRange = (m: string): { start: string; end: string } => {
@@ -158,6 +166,7 @@ const fmtDays = (v: number | string | null | undefined): string => {
 
 const empName = (e?: Emp): string => e?.name || e?.employee_code || 'Unknown';
 const isActive = (e: Emp): boolean => e.is_active !== false;
+const isTimed = (s: Status): boolean => s === 'present' || s === 'halfday';
 
 /** PostgREST returns max 1000 rows per request, so read in pages. */
 async function fetchAll<T>(
@@ -181,7 +190,7 @@ const csvCell = (v: unknown): string => {
 };
 
 const downloadCsv = (fileName: string, rows: Array<Array<string | number>>) => {
-  const csv = '\uFEFF' + rows.map(r => r.map(csvCell).join(',')).join('\r\n'); // BOM → Excel reads Hindi names
+  const csv = '\uFEFF' + rows.map(r => r.map(csvCell).join(',')).join('\r\n'); // BOM so Excel reads UTF-8 names
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
   const a = document.createElement('a');
   a.href = url;
@@ -192,7 +201,7 @@ const downloadCsv = (fileName: string, rows: Array<Array<string | number>>) => {
   URL.revokeObjectURL(url);
 };
 
-/** Dates in the month (up to today, from joining date) that have no record */
+/** Dates in the month (up to today, from the joining date) that have no record */
 const unmarkedDatesOf = (emp: Emp, month: string, today: string, marked: Set<string>): string[] => {
   const { start, end } = monthRange(month);
   const first = emp.joining_date && emp.joining_date > start ? emp.joining_date : start;
@@ -209,7 +218,7 @@ const unmarkedDatesOf = (emp: Emp, month: string, today: string, marked: Set<str
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Small presentational pieces (defined OUTSIDE the page → never remount)
+// Small presentational pieces (defined OUTSIDE the page, so they never remount)
 // ═════════════════════════════════════════════════════════════════════════════
 const StatusBadge: React.FC<{ status: Status }> = ({ status }) => (
   <span className={cn('inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold', STATUS_META[status]?.badge)}>
@@ -243,14 +252,14 @@ const UnmarkedChips: React.FC<{ dates: string[]; onPick: (date: string) => void 
           type="button"
           onClick={() => onPick(d)}
           className="rounded-full border border-dashed border-red-300 px-2 py-0.5 text-[11px] text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40"
-          title="Is din ki attendance mark karein"
+          title="Mark attendance for this day"
         >
           {shortDay(d)}
         </button>
       ))}
       {dates.length > 6 && (
         <button type="button" onClick={() => setAll(v => !v)} className="text-[11px] text-blue-600 underline">
-          {all ? 'kam dikhayein' : `+${dates.length - 6} aur`}
+          {all ? 'show less' : `+${dates.length - 6} more`}
         </button>
       )}
     </div>
@@ -289,7 +298,7 @@ const RecordDialog: React.FC<{
     setRemarks(state.row?.remarks ?? '');
   }, [state]);
 
-  const timed = status === 'present' || status === 'halfday';
+  const timed = isTimed(status);
   const options = useMemo(
     () => employees.filter(e => isActive(e) || e.id === empId),
     [employees, empId]
@@ -297,10 +306,10 @@ const RecordDialog: React.FC<{
 
   const save = async () => {
     if (!user) return;
-    if (!empId) { toast.error('Employee select karein'); return; }
-    if (!date) { toast.error('Date select karein'); return; }
+    if (!empId) { toast.error('Select an employee'); return; }
+    if (!date) { toast.error('Select a date'); return; }
     if (timed && inT && outT && outT <= inT) {
-      toast.error('Out time, In time ke baad ka hona chahiye');
+      toast.error('Out time must be later than in time');
       return;
     }
     setSaving(true);
@@ -324,7 +333,7 @@ const RecordDialog: React.FC<{
         }
         const { error } = await supabase.from('attendance').update(patch).eq('id', state.row.id);
         if (error) throw new Error(error.message);
-        toast.success('Attendance update ho gayi ✅');
+        toast.success('Attendance updated');
       } else {
         const { error } = await supabase.from('attendance').insert({
           emp_id: empId,
@@ -338,16 +347,16 @@ const RecordDialog: React.FC<{
         });
         if (error) {
           if ((error as { code?: string }).code === '23505') {
-            throw new Error('Is date ka record pehle se hai. Records tab se Edit karein.');
+            throw new Error('A record already exists for this date. Use the Records tab to edit it.');
           }
           throw new Error(error.message);
         }
-        toast.success('Attendance mark ho gayi ✅');
+        toast.success('Attendance marked');
       }
       onSaved();
       onClose();
     } catch (e) {
-      toast.error((e as Error).message || 'Save nahi ho paaya');
+      toast.error((e as Error).message || 'Could not save');
     } finally {
       setSaving(false);
     }
@@ -357,9 +366,9 @@ const RecordDialog: React.FC<{
     <Dialog open={!!state} onOpenChange={v => { if (!v && !saving) onClose(); }}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{editing ? 'Attendance Edit' : 'Attendance Mark'}</DialogTitle>
+          <DialogTitle>{editing ? 'Edit attendance' : 'Mark attendance'}</DialogTitle>
           <DialogDescription>
-            {editing ? 'Is din ka record badlein.' : 'Kisi bhi employee ki kisi bhi date ki attendance mark karein.'}
+            {editing ? "Change this day's record." : 'Mark attendance for any employee on any date.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -408,7 +417,7 @@ const RecordDialog: React.FC<{
 
           <Button className="w-full gap-2" onClick={save} disabled={saving}>
             {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-            {editing ? 'Update Karein' : 'Mark Karein'}
+            {editing ? 'Update' : 'Mark'}
           </Button>
         </div>
       </DialogContent>
@@ -432,7 +441,7 @@ const LiveTab: React.FC<{
     const t = istToday();
     setToday(t);
     const { data, error } = await supabase.from('attendance').select(COLS).eq('date', t);
-    if (error) toast.error(error.message || 'Aaj ka data load nahi hua');
+    if (error) toast.error(error.message || "Could not load today's attendance");
     else setRows((data as AttRow[]) ?? []);
     setLoading(false);
   }, []);
@@ -455,7 +464,7 @@ const LiveTab: React.FC<{
   const notMarked = team.filter(e => !byEmp.has(e.id)).length;
   const workingNow = team.filter(e => {
     const r = byEmp.get(e.id);
-    return !!r && !!r.check_in_at && !r.check_out_at && (r.status === 'present' || r.status === 'halfday');
+    return !!r && !!r.check_in_at && !r.check_out_at && isTimed(r.status);
   }).length;
 
   return (
@@ -472,12 +481,12 @@ const LiveTab: React.FC<{
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
         <Stat label="Team" value={team.length} />
         <Stat label="Present" value={count('present')} tone="text-green-600" />
-        <Stat label="Abhi kaam par" value={workingNow} tone="text-blue-600" />
+        <Stat label="Working now" value={workingNow} tone="text-blue-600" />
         <Stat label="Half Day" value={count('halfday')} tone="text-amber-600" />
         <Stat label="Leave" value={count('leave')} tone="text-blue-600" />
         <Stat label="Off / Holiday" value={count('weekoff') + count('holiday')} tone="text-purple-600" />
         <Stat label="Absent" value={count('absent')} tone="text-red-600" />
-        <Stat label="Not Marked" value={notMarked} tone="text-slate-500" />
+        <Stat label="Not marked" value={notMarked} tone="text-slate-500" />
       </div>
 
       <Card>
@@ -502,7 +511,7 @@ const LiveTab: React.FC<{
                 <TableBody>
                   {team.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-8 text-center text-slate-500">Koi active employee nahi mila.</TableCell>
+                      <TableCell colSpan={6} className="py-8 text-center text-slate-500">No active employees found.</TableCell>
                     </TableRow>
                   ) : (
                     team.map(e => {
@@ -547,7 +556,7 @@ const LiveTab: React.FC<{
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
-// TAB 2 — Bulk mark
+// TAB 2 — Bulk mark (status and time per line, saved in one action)
 // ═════════════════════════════════════════════════════════════════════════════
 const BulkTab: React.FC<{
   employees: Emp[];
@@ -557,10 +566,10 @@ const BulkTab: React.FC<{
 }> = ({ employees, refreshKey, onSaved, onSingle }) => {
   const { user } = useAuth();
   const [date, setDate] = useState(istToday());
-  const [status, setStatus] = useState<Status>('present');
-  const [inT, setInT] = useState('');
-  const [outT, setOutT] = useState('');
-  const [remarks, setRemarks] = useState('');
+  const [defStatus, setDefStatus] = useState<Status>('present');
+  const [defIn, setDefIn] = useState('');
+  const [defOut, setDefOut] = useState('');
+  const [lines, setLines] = useState<Record<string, BulkLine>>({});
   const [existing, setExisting] = useState<Set<string>>(new Set());
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
@@ -588,7 +597,27 @@ const BulkTab: React.FC<{
     return () => { off = true; };
   }, [date, team, refreshKey]);
 
-  const timed = status === 'present' || status === 'halfday';
+  const lineOf = (id: string): BulkLine =>
+    lines[id] ?? { status: defStatus, inT: defIn, outT: defOut, remarks: '' };
+
+  const setLine = (id: string, patch: Partial<BulkLine>) =>
+    setLines(prev => ({ ...prev, [id]: { ...lineOf(id), ...prev[id], ...patch } }));
+
+  const applyToAll = () => {
+    setLines(prev => {
+      const next = { ...prev };
+      team.forEach(e => {
+        if (existing.has(e.id)) return;
+        next[e.id] = {
+          status: defStatus,
+          inT: isTimed(defStatus) ? defIn : '',
+          outT: isTimed(defStatus) ? defOut : '',
+          remarks: prev[e.id]?.remarks ?? '',
+        };
+      });
+      return next;
+    });
+  };
 
   const toggle = (id: string) =>
     setPicked(prev => {
@@ -602,33 +631,44 @@ const BulkTab: React.FC<{
 
   const submit = async () => {
     if (!user) return;
-    const ids = selectable.filter(e => picked.has(e.id)).map(e => e.id);
-    if (ids.length === 0) { toast.error('Kam se kam ek employee select karein'); return; }
-    if (timed && inT && outT && outT <= inT) { toast.error('Out time, In time ke baad ka hona chahiye'); return; }
-    if (!window.confirm(`${ids.length} employee ko ${STATUS_META[status].label} mark karein (${date})?`)) return;
+    const chosen = selectable.filter(e => picked.has(e.id));
+    if (chosen.length === 0) { toast.error('Select at least one employee'); return; }
+
+    for (const e of chosen) {
+      const l = lineOf(e.id);
+      if (isTimed(l.status) && l.inT && l.outT && l.outT <= l.inT) {
+        toast.error(`${empName(e)}: out time must be later than in time`);
+        return;
+      }
+    }
+    if (!window.confirm(`Save attendance for ${chosen.length} employee(s) on ${date}?`)) return;
 
     setSaving(true);
     try {
-      const payload = ids.map(id => ({
-        emp_id: id,
-        date,
-        status,
-        in_time: timed && inT ? inT : null,
-        out_time: timed && outT ? outT : null,
-        remarks: remarks.trim() || null,
-        source: 'admin',
-        marked_by: user.id,
-      }));
+      const payload = chosen.map(e => {
+        const l = lineOf(e.id);
+        return {
+          emp_id: e.id,
+          date,
+          status: l.status,
+          in_time: isTimed(l.status) && l.inT ? l.inT : null,
+          out_time: isTimed(l.status) && l.outT ? l.outT : null,
+          remarks: l.remarks.trim() || null,
+          source: 'admin',
+          marked_by: user.id,
+        };
+      });
       const { data, error } = await supabase
         .from('attendance')
         .upsert(payload, { onConflict: 'emp_id,date', ignoreDuplicates: true })
         .select('id');
       if (error) throw new Error(error.message);
       const done = (data as unknown[] | null)?.length ?? 0;
-      toast.success(`${done} attendance mark ho gayi ✅${done < ids.length ? ` (${ids.length - done} pehle se thi)` : ''}`);
+      toast.success(`${done} attendance record(s) saved${done < chosen.length ? ` (${chosen.length - done} already existed)` : ''}`);
+      setLines({});
       onSaved();
     } catch (e) {
-      toast.error((e as Error).message || 'Bulk mark nahi ho paaya');
+      toast.error((e as Error).message || 'Could not save');
     } finally {
       setSaving(false);
     }
@@ -639,39 +679,38 @@ const BulkTab: React.FC<{
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
-            <span className="flex items-center gap-2"><Users className="h-4 w-4 text-blue-600" /> Bulk Attendance</span>
+            <span className="flex items-center gap-2"><Users className="h-4 w-4 text-blue-600" /> Bulk attendance</span>
             <Button size="sm" variant="outline" className="gap-1" onClick={onSingle}>
-              <Plus className="h-3.5 w-3.5" /> Ek employee ki entry
+              <Plus className="h-3.5 w-3.5" /> Single entry
             </Button>
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
             <Field label="Date">
               <input type="date" className={INPUT_CLS} value={date} onChange={e => setDate(e.target.value)} />
             </Field>
-            <Field label="Status">
-              <select className={SELECT_CLS} value={status} onChange={e => setStatus(e.target.value as Status)}>
+            <Field label="Default status">
+              <select className={SELECT_CLS} value={defStatus} onChange={e => setDefStatus(e.target.value as Status)}>
                 {STATUSES.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
               </select>
             </Field>
-            {timed && (
-              <>
-                <Field label="In time (optional)">
-                  <input type="time" className={INPUT_CLS} value={inT} onChange={e => setInT(e.target.value)} />
-                </Field>
-                <Field label="Out time (optional)">
-                  <input type="time" className={INPUT_CLS} value={outT} onChange={e => setOutT(e.target.value)} />
-                </Field>
-              </>
-            )}
+            <Field label="Default in (optional)">
+              <input type="time" className={INPUT_CLS} value={defIn} onChange={e => setDefIn(e.target.value)} disabled={!isTimed(defStatus)} />
+            </Field>
+            <Field label="Default out (optional)">
+              <input type="time" className={INPUT_CLS} value={defOut} onChange={e => setDefOut(e.target.value)} disabled={!isTimed(defStatus)} />
+            </Field>
+            <div className="flex items-end">
+              <Button variant="outline" className="w-full gap-1" onClick={applyToAll}>
+                <Wand2 className="h-4 w-4" /> Apply to all rows
+              </Button>
+            </div>
           </div>
-          <Field label="Remarks (optional)">
-            <input className={INPUT_CLS} value={remarks} onChange={e => setRemarks(e.target.value)} />
-          </Field>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Jinki attendance is date par pehle se hai, unhe yahan se badla nahi jaata (Records tab se Edit karein).
-            Time nahi bharenge to blank rahega, koi nakli 18:00 nahi lagta.
+            Set the default once and press "Apply to all rows", then change any single row if needed. Everything is saved
+            together with one button. Employees already marked on this date are not changed (use the Records tab).
+            Times are optional; nothing is filled in automatically.
           </p>
         </CardContent>
       </Card>
@@ -686,38 +725,88 @@ const BulkTab: React.FC<{
                 checked={allChecked}
                 onChange={e => setPicked(e.target.checked ? new Set(selectable.map(x => x.id)) : new Set())}
               />
-              Sabko select karein ({picked.size} / {selectable.length})
+              Select all ({picked.size} / {selectable.length})
             </label>
             <Button onClick={submit} disabled={saving || loading} className="gap-2">
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-              Mark Karein
+              Save selected
             </Button>
           </div>
 
-          <div className="divide-y dark:divide-slate-800">
-            {team.map(e => {
-              const done = existing.has(e.id);
-              return (
-                <label
-                  key={e.id}
-                  className={cn('flex items-center gap-3 px-4 py-2.5 sm:px-0', done ? 'opacity-50' : 'cursor-pointer')}
-                >
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 accent-blue-600"
-                    disabled={done}
-                    checked={!done && picked.has(e.id)}
-                    onChange={() => toggle(e.id)}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{empName(e)}</span>
-                    <span className="block text-xs text-slate-500">{e.employee_code || '—'}{e.designation ? ` · ${e.designation}` : ''}</span>
-                  </span>
-                  {done && <span className="text-xs text-slate-500">pehle se marked</span>}
-                </label>
-              );
-            })}
-            {team.length === 0 && <p className="px-4 py-6 text-center text-sm text-slate-500">Is date ke liye koi employee nahi.</p>}
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10" />
+                  <TableHead>Employee</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>In</TableHead>
+                  <TableHead>Out</TableHead>
+                  <TableHead>Remarks</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {team.map(e => {
+                  const done = existing.has(e.id);
+                  const l = lineOf(e.id);
+                  const timed = isTimed(l.status);
+                  return (
+                    <TableRow key={e.id} className={cn(done && 'opacity-50')}>
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-blue-600"
+                          disabled={done}
+                          checked={!done && picked.has(e.id)}
+                          onChange={() => toggle(e.id)}
+                          aria-label={`Select ${empName(e)}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <p className="font-medium">{empName(e)}</p>
+                        <p className="text-xs text-slate-500">{done ? 'already marked' : (e.employee_code || '—')}</p>
+                      </TableCell>
+                      <TableCell>
+                        <select
+                          className={cn(CELL_INPUT_CLS, 'w-28')}
+                          value={l.status}
+                          disabled={done}
+                          onChange={ev => setLine(e.id, { status: ev.target.value as Status })}
+                        >
+                          {STATUSES.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
+                        </select>
+                      </TableCell>
+                      <TableCell>
+                        <input
+                          type="time" className={cn(CELL_INPUT_CLS, 'w-28')}
+                          value={timed ? l.inT : ''} disabled={done || !timed}
+                          onChange={ev => setLine(e.id, { inT: ev.target.value })}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <input
+                          type="time" className={cn(CELL_INPUT_CLS, 'w-28')}
+                          value={timed ? l.outT : ''} disabled={done || !timed}
+                          onChange={ev => setLine(e.id, { outT: ev.target.value })}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <input
+                          className={cn(CELL_INPUT_CLS, 'w-44')} placeholder="Optional"
+                          value={l.remarks} disabled={done}
+                          onChange={ev => setLine(e.id, { remarks: ev.target.value })}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {team.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-6 text-center text-sm text-slate-500">No employees for this date.</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
           </div>
         </CardContent>
       </Card>
@@ -726,7 +815,223 @@ const BulkTab: React.FC<{
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
-// TAB 3 — Records (filter, edit, delete)
+// TAB 3 — Missing check-outs (review and fix many at once)
+// ═════════════════════════════════════════════════════════════════════════════
+const FixTab: React.FC<{
+  employees: Emp[];
+  refreshKey: number;
+  onSaved: () => void;
+}> = ({ employees, refreshKey, onSaved }) => {
+  const { user } = useAuth();
+  const [rows, setRows] = useState<AttRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [outTimes, setOutTimes] = useState<Record<string, string>>({});
+  const [statuses, setStatuses] = useState<Record<string, Status>>({});
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [bulkOut, setBulkOut] = useState('');
+  const [bulkStatus, setBulkStatus] = useState<'' | 'present' | 'halfday'>('');
+  const [saving, setSaving] = useState(false);
+
+  const empMap = useMemo(() => new Map(employees.map(e => [e.id, e] as [string, Emp])), [employees]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('attendance')
+      .select(COLS)
+      .not('check_in_at', 'is', null)
+      .is('check_out_at', null)
+      .in('status', ['present', 'halfday'])
+      .lt('date', istToday())
+      .order('date', { ascending: false });
+    if (error) toast.error(error.message || 'Could not load missing check-outs');
+    else {
+      setRows((data as AttRow[]) ?? []);
+      setOutTimes({});
+      setStatuses({});
+      setPicked(new Set());
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load, refreshKey]);
+
+  const statusOf = (r: AttRow): Status => statuses[r.id] ?? r.status;
+
+  const applyBulk = () => {
+    if (picked.size === 0) { toast.error('Select at least one row first'); return; }
+    if (!bulkOut && !bulkStatus) { toast.error('Enter an out time and/or choose a status to apply'); return; }
+    if (bulkOut) setOutTimes(prev => { const next = { ...prev }; picked.forEach(id => { next[id] = bulkOut; }); return next; });
+    if (bulkStatus) setStatuses(prev => { const next = { ...prev }; picked.forEach(id => { next[id] = bulkStatus; }); return next; });
+  };
+
+  const toggle = (id: string) =>
+    setPicked(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  const saveSelected = async () => {
+    if (!user) return;
+    const chosen = rows.filter(r => picked.has(r.id));
+    if (chosen.length === 0) { toast.error('Select at least one row'); return; }
+
+    for (const r of chosen) {
+      const out = outTimes[r.id] ?? '';
+      const who = `${empName(empMap.get(r.emp_id))} (${shortDay(r.date)})`;
+      if (!out) { toast.error(`${who}: enter the out time`); return; }
+      const inT = isoToHHMM(r.check_in_at);
+      if (inT && out <= inT) { toast.error(`${who}: out time must be later than the check-in (${inT})`); return; }
+    }
+    if (!window.confirm(`Save the check-out for ${chosen.length} record(s)?`)) return;
+
+    setSaving(true);
+    try {
+      let failed = 0;
+      for (let i = 0; i < chosen.length; i += 10) {
+        const batch = chosen.slice(i, i + 10);
+        const results = await Promise.all(
+          batch.map(r =>
+            supabase
+              .from('attendance')
+              .update({
+                status: statusOf(r),
+                out_time: outTimes[r.id],
+                check_out_at: hhmmToIso(r.date, outTimes[r.id]),
+                marked_by: user.id,
+              })
+              .eq('id', r.id)
+          )
+        );
+        failed += results.filter(x => x.error).length;
+      }
+      if (failed) toast.error(`${failed} record(s) could not be saved`);
+      else toast.success(`${chosen.length} check-out(s) saved`);
+      onSaved();
+      await load();
+    } catch (e) {
+      toast.error((e as Error).message || 'Could not save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const allChecked = rows.length > 0 && rows.every(r => picked.has(r.id));
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Missing check-outs</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            These employees checked in but never checked out. Nothing is filled in automatically, because a made-up
+            time (like 6 PM) could be wrong. Enter the real out time for each row, or select rows and apply one time
+            and/or status to all of them, then save everything together. Choose Half Day for anyone who left early.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+            <Field label="Out time for selected rows">
+              <input type="time" className={INPUT_CLS} value={bulkOut} onChange={e => setBulkOut(e.target.value)} />
+            </Field>
+            <Field label="Status for selected rows">
+              <select className={SELECT_CLS} value={bulkStatus} onChange={e => setBulkStatus(e.target.value as '' | 'present' | 'halfday')}>
+                <option value="">Keep as it is</option>
+                <option value="present">Present</option>
+                <option value="halfday">Half Day</option>
+              </select>
+            </Field>
+            <div className="flex items-end">
+              <Button variant="outline" className="w-full gap-1" onClick={applyBulk}>
+                <Wand2 className="h-4 w-4" /> Apply to selected
+              </Button>
+            </div>
+            <div className="flex items-end">
+              <Button className="w-full gap-2" onClick={saveSelected} disabled={saving || picked.size === 0}>
+                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                Save selected ({picked.size})
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="px-0 pt-4 sm:px-6">
+          {loading ? (
+            <div className="space-y-2 px-4">
+              {[0, 1, 2].map(i => <Skeleton key={i} className="h-10 w-full" />)}
+            </div>
+          ) : rows.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-500">No missing check-outs. Everything is up to date.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-10">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-blue-600"
+                        checked={allChecked}
+                        onChange={e => setPicked(e.target.checked ? new Set(rows.map(r => r.id)) : new Set())}
+                        aria-label="Select all"
+                      />
+                    </TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Employee</TableHead>
+                    <TableHead>Checked in</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Out time</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map(r => (
+                    <TableRow key={r.id}>
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-blue-600"
+                          checked={picked.has(r.id)}
+                          onChange={() => toggle(r.id)}
+                          aria-label="Select row"
+                        />
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap font-medium">{dayLabel(r.date)}</TableCell>
+                      <TableCell className="whitespace-nowrap">{empName(empMap.get(r.emp_id))}</TableCell>
+                      <TableCell className="whitespace-nowrap">{inOf(r)}</TableCell>
+                      <TableCell>
+                        <select
+                          className={cn(CELL_INPUT_CLS, 'w-28')}
+                          value={statusOf(r)}
+                          onChange={ev => setStatuses(p => ({ ...p, [r.id]: ev.target.value as Status }))}
+                        >
+                          <option value="present">Present</option>
+                          <option value="halfday">Half Day</option>
+                        </select>
+                      </TableCell>
+                      <TableCell>
+                        <input
+                          type="time" className={cn(CELL_INPUT_CLS, 'w-28')}
+                          value={outTimes[r.id] ?? ''}
+                          onChange={ev => setOutTimes(p => ({ ...p, [r.id]: ev.target.value }))}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// TAB 4 — Records (filter, edit, delete)
 // ═════════════════════════════════════════════════════════════════════════════
 const RecordsTab: React.FC<{
   employees: Emp[];
@@ -756,7 +1061,7 @@ const RecordsTab: React.FC<{
       });
       if (id === req.current) setRows(data);
     } catch (e) {
-      if (id === req.current) toast.error((e as Error).message || 'Records load nahi hue');
+      if (id === req.current) toast.error((e as Error).message || 'Could not load records');
     } finally {
       if (id === req.current) setLoading(false);
     }
@@ -766,10 +1071,10 @@ const RecordsTab: React.FC<{
 
   const remove = async (r: AttRow) => {
     const who = empName(empMap.get(r.emp_id));
-    if (!window.confirm(`${who} ka ${shortDay(r.date)} ka record delete karein? Ye wapas nahi aayega.`)) return;
+    if (!window.confirm(`Delete ${who}'s record for ${shortDay(r.date)}? This cannot be undone.`)) return;
     const { error } = await supabase.from('attendance').delete().eq('id', r.id);
     if (error) { toast.error(error.message); return; }
-    toast.success('Record delete ho gaya');
+    toast.success('Record deleted');
     onChanged();
   };
 
@@ -779,7 +1084,7 @@ const RecordsTab: React.FC<{
         <CardContent className="grid grid-cols-1 gap-3 pt-4 sm:grid-cols-3">
           <Field label="Employee">
             <select className={SELECT_CLS} value={empFilter} onChange={e => setEmpFilter(e.target.value)}>
-              <option value="">Sab employees</option>
+              <option value="">All employees</option>
               {employees.map(e => <option key={e.id} value={e.id}>{empName(e)}{isActive(e) ? '' : ' (inactive)'}</option>)}
             </select>
           </Field>
@@ -794,7 +1099,7 @@ const RecordsTab: React.FC<{
 
       <Card>
         <CardContent className="px-0 pt-4 sm:px-6">
-          <p className="mb-2 px-4 text-xs text-slate-500 sm:px-0">{loading ? 'Load ho raha hai…' : `${rows.length} records`}</p>
+          <p className="mb-2 px-4 text-xs text-slate-500 sm:px-0">{loading ? 'Loading…' : `${rows.length} records`}</p>
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -811,7 +1116,7 @@ const RecordsTab: React.FC<{
               <TableBody>
                 {rows.length === 0 && !loading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-8 text-center text-slate-500">Koi record nahi mila.</TableCell>
+                    <TableCell colSpan={7} className="py-8 text-center text-slate-500">No records found.</TableCell>
                   </TableRow>
                 ) : (
                   rows.map(r => (
@@ -823,10 +1128,10 @@ const RecordsTab: React.FC<{
                       <TableCell className="whitespace-nowrap">{outOf(r)}</TableCell>
                       <TableCell className="max-w-[200px] truncate text-slate-500">{r.remarks || '—'}</TableCell>
                       <TableCell className="whitespace-nowrap text-right">
-                        <Button size="sm" variant="outline" className="mr-1 gap-1" onClick={() => onOpen({ row: r })}>
+                        <Button size="sm" variant="outline" className="mr-1 gap-1" onClick={() => onOpen({ row: r })} aria-label="Edit record">
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
-                        <Button size="sm" variant="outline" className="gap-1 text-red-600" onClick={() => remove(r)}>
+                        <Button size="sm" variant="outline" className="gap-1 text-red-600" onClick={() => remove(r)} aria-label="Delete record">
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </TableCell>
@@ -843,7 +1148,7 @@ const RecordsTab: React.FC<{
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
-// TAB 4 — Monthly summary (payable days, unmarked days, CSV export)
+// TAB 5 — Monthly summary (payable days, unmarked days, CSV export)
 // ═════════════════════════════════════════════════════════════════════════════
 const SummaryTab: React.FC<{
   employees: Emp[];
@@ -851,8 +1156,8 @@ const SummaryTab: React.FC<{
   onOpen: (s: DialogState) => void;
 }> = ({ employees, refreshKey, onOpen }) => {
   const today = istToday();
-  const months = useMemo(() => lastTwelveMonths(today), [today]);
-  const [month, setMonth] = useState(today.slice(0, 7));
+  const months = useMemo(() => keptMonths(today), [today]);
+  const [month, setMonth] = useState(months[0]);
   const [summary, setSummary] = useState<SummaryRow[]>([]);
   const [records, setRecords] = useState<AttRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -874,7 +1179,7 @@ const SummaryTab: React.FC<{
       setSummary((sumRes.data as SummaryRow[]) ?? []);
       setRecords(recs);
     } catch (e) {
-      if (id === req.current) toast.error((e as Error).message || 'Summary load nahi hui');
+      if (id === req.current) toast.error((e as Error).message || 'Could not load the summary');
     } finally {
       if (id === req.current) setLoading(false);
     }
@@ -957,7 +1262,8 @@ const SummaryTab: React.FC<{
       </div>
 
       <p className="text-xs text-slate-500 dark:text-slate-400">
-        Payable Days = Present + Leave + Week Off + Holiday + (Half Day × 0.5). Laal date par click karke us din ki attendance mark karein.
+        Only the current and the previous month are kept here. Older attendance is archived from the HR Backup page.
+        Payable Days = Present + Leave + Week Off + Holiday + (Half Day × 0.5). Click a red date to mark that day.
       </p>
 
       <Card>
@@ -978,14 +1284,14 @@ const SummaryTab: React.FC<{
                     <TableHead className="text-center">WO</TableHead>
                     <TableHead className="text-center">H</TableHead>
                     <TableHead className="text-center">A</TableHead>
-                    <TableHead>Not Marked</TableHead>
+                    <TableHead>Not marked</TableHead>
                     <TableHead className="text-right">Payable</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {lines.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="py-8 text-center text-slate-500">Is mahine ka data nahi hai.</TableCell>
+                      <TableCell colSpan={9} className="py-8 text-center text-slate-500">No data for this month.</TableCell>
                     </TableRow>
                   ) : (
                     lines.map(({ s, e, unmarked }) => (
@@ -1035,19 +1341,13 @@ const SummaryTab: React.FC<{
 // ═════════════════════════════════════════════════════════════════════════════
 // PAGE
 // ═════════════════════════════════════════════════════════════════════════════
-const TABS: Array<{ id: Tab; label: string }> = [
-  { id: 'live', label: 'Aaj (Live)' },
-  { id: 'mark', label: 'Mark' },
-  { id: 'records', label: 'Records / Edit' },
-  { id: 'summary', label: 'Monthly Summary' },
-];
-
 const AdminAttendancePage: React.FC = () => {
   const [tab, setTab] = useState<Tab>('live');
   const [employees, setEmployees] = useState<Emp[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [pending, setPending] = useState(0);
 
   useEffect(() => {
     let off = false;
@@ -1058,16 +1358,40 @@ const AdminAttendancePage: React.FC = () => {
         .eq('role', 'employee')
         .order('name');
       if (off) return;
-      if (error) toast.error(error.message || 'Employees load nahi hue');
+      if (error) toast.error(error.message || 'Could not load employees');
       else setEmployees((data as Emp[]) ?? []);
       setLoading(false);
     })();
     return () => { off = true; };
   }, []);
 
+  // Number of missing check-outs, shown as a badge on the tab
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      const { count } = await supabase
+        .from('attendance')
+        .select('id', { count: 'exact', head: true })
+        .not('check_in_at', 'is', null)
+        .is('check_out_at', null)
+        .in('status', ['present', 'halfday'])
+        .lt('date', istToday());
+      if (!off) setPending(count ?? 0);
+    })();
+    return () => { off = true; };
+  }, [refreshKey]);
+
   const bump = useCallback(() => setRefreshKey(k => k + 1), []);
   const closeDialog = useCallback(() => setDialog(null), []);
   const openDialog = useCallback((s: DialogState) => setDialog(s), []);
+
+  const tabs: Array<{ id: Tab; label: string }> = [
+    { id: 'live', label: 'Today (Live)' },
+    { id: 'mark', label: 'Mark' },
+    { id: 'fix', label: pending > 0 ? `Missing check-outs (${pending})` : 'Missing check-outs' },
+    { id: 'records', label: 'Records / Edit' },
+    { id: 'summary', label: 'Monthly Summary' },
+  ];
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4">
@@ -1077,7 +1401,7 @@ const AdminAttendancePage: React.FC = () => {
       </div>
 
       <div className="flex gap-1 overflow-x-auto border-b dark:border-slate-800">
-        {TABS.map(t => (
+        {tabs.map(t => (
           <button
             key={t.id}
             type="button"
@@ -1086,7 +1410,8 @@ const AdminAttendancePage: React.FC = () => {
               'whitespace-nowrap border-b-2 px-4 py-2 text-sm font-semibold transition-colors',
               tab === t.id
                 ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200',
+              t.id === 'fix' && pending > 0 && tab !== 'fix' && 'text-amber-600'
             )}
           >
             {t.label}
@@ -1104,6 +1429,7 @@ const AdminAttendancePage: React.FC = () => {
           {tab === 'mark' && (
             <BulkTab employees={employees} refreshKey={refreshKey} onSaved={bump} onSingle={() => openDialog({})} />
           )}
+          {tab === 'fix' && <FixTab employees={employees} refreshKey={refreshKey} onSaved={bump} />}
           {tab === 'records' && (
             <RecordsTab employees={employees} refreshKey={refreshKey} onOpen={openDialog} onChanged={bump} />
           )}

@@ -249,9 +249,15 @@ const SlipsTab: React.FC<{
   };
 
   const isCurrentMonth = month === today.slice(0, 7);
+  // Attendance older than the previous month is archived, so new slips cannot be calculated for it
+  const locked = month < (months[1] ?? months[0]);
 
   const generate = async (list: Emp[], busyKey: string) => {
     if (!user || busy) return;
+    if (locked) {
+      toast.error('Attendance for this month is archived. Slips can only be generated for the current and the previous month.');
+      return;
+    }
     const ready = list.filter(hasSalary);
     const skipped = list.filter(e => !hasSalary(e));
     if (ready.length === 0) {
@@ -300,13 +306,20 @@ const SlipsTab: React.FC<{
         <MonthPicker value={month} onChange={setMonth} months={months} />
         <Button
           className="gap-2"
-          disabled={loading || !!busy || team.length === 0}
+          disabled={loading || !!busy || locked || team.length === 0}
           onClick={() => generate(team, 'all')}
         >
           {busy === 'all' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
           Generate all slips
         </Button>
       </div>
+
+      {locked && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+          Attendance for {monthLabel(month)} has been archived, so new slips cannot be calculated for it. Slips that were
+          already generated can still be printed.
+        </div>
+      )}
 
       <div className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
         <p>
@@ -431,7 +444,7 @@ const SlipsTab: React.FC<{
                             <Button
                               size="sm"
                               variant={slip ? 'outline' : 'default'}
-                              disabled={!!busy || noSalary}
+                              disabled={!!busy || noSalary || locked}
                               onClick={() => generate([e], e.id)}
                               className="gap-1"
                             >

@@ -130,7 +130,7 @@ ${s.notes ? `<p class="note">Note: ${esc(s.notes)}</p>` : ''}
 const printSlip = (s: Slip, e: EmpInfo) => {
   const w = window.open('', '_blank');
   if (!w) {
-    toast.error('Pop-up block ho gaya. Browser me pop-up allow karke dobara try karein.');
+    toast.error('The pop-up was blocked. Allow pop-ups for this site and try again.');
     return;
   }
   w.document.open();
@@ -238,7 +238,7 @@ const MySalaryPage: React.FC = () => {
         });
       }
     } catch (e: any) {
-      toast.error(e?.message || 'Salary slips load nahi ho paayi');
+      toast.error(e?.message || 'Could not load salary slips');
     } finally {
       setLoading(false);
     }
@@ -254,7 +254,7 @@ const MySalaryPage: React.FC = () => {
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
             <FileText className="h-5 w-5 text-blue-600" />
-            Meri Salary Slips
+            My Salary Slips
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
@@ -265,7 +265,7 @@ const MySalaryPage: React.FC = () => {
             </>
           ) : slips.length === 0 ? (
             <p className="py-8 text-center text-sm text-slate-500">
-              Abhi koi salary slip ready nahi hai. Admin slip banayega to yahan dikhegi.
+              No salary slip is ready yet. It will appear here once the admin generates it.
             </p>
           ) : (
             slips.map(s => (
@@ -276,7 +276,7 @@ const MySalaryPage: React.FC = () => {
                 <div className="min-w-0">
                   <p className="font-semibold">{monthLabel(s.month)}</p>
                   <p className="text-xs text-slate-500">
-                    Payable {days(s.payable_days)} / {s.days_in_month ?? '—'} din
+                    Payable {days(s.payable_days)} / {s.days_in_month ?? '—'} days
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -284,7 +284,7 @@ const MySalaryPage: React.FC = () => {
                     {inr(s.net_salary)}
                   </span>
                   <Button size="sm" variant="outline" className="gap-1" onClick={() => setOpen(s)}>
-                    <Eye className="h-3.5 w-3.5" /> Dekhein
+                    <Eye className="h-3.5 w-3.5" /> View
                   </Button>
                   <Button size="sm" className="gap-1" onClick={() => printSlip(s, emp)}>
                     <Printer className="h-3.5 w-3.5" /> PDF
