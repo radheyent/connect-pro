@@ -63,7 +63,7 @@ interface RowInputs {
   manual: string;
 }
 
-type Tab = 'slips' | 'incentives' | 'salaries';
+type Tab = 'slips' | 'incentives';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Helpers
@@ -296,7 +296,7 @@ const SlipsTab: React.FC<{
     const ready = list.filter(hasSalary);
     const skipped = list.filter(e => !hasSalary(e));
     if (ready.length === 0) {
-      toast.error('No salary is set for the selected employees. Set it in the Salaries tab first.');
+      toast.error('No salary is set for the selected employees. Set it first in Employees → Details → Salary.');
       return;
     }
 
@@ -422,7 +422,7 @@ const SlipsTab: React.FC<{
                             <p className="text-xs text-slate-500">{e.employee_code || '—'}</p>
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
-                            {noSalary ? <span className="text-red-600">Not set</span> : inr(fixed)}
+                            {noSalary ? <span className="text-red-600" title="Set it in Employees → Details → Salary">Not set</span> : inr(fixed)}
                           </TableCell>
                           <TableCell className="whitespace-nowrap text-center">
                             <span className="font-semibold tabular-nums">{fmtDays(sum?.payable_days)}</span>
@@ -668,123 +668,11 @@ const IncentivesTab: React.FC<{
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
-// TAB 3 — Salaries
-// ═════════════════════════════════════════════════════════════════════════════
-const SalariesTab: React.FC<{
-  employees: Emp[];
-  payroll: Map<string, number>;
-  onSaved: () => void;
-}> = ({ employees, payroll, onSaved }) => {
-  const { user } = useAuth();
-  const [edits, setEdits] = useState<Record<string, string>>({});
-  const [savingId, setSavingId] = useState<string | null>(null);
-
-  const team = useMemo(
-    () => employees.filter(isActive).sort((a, b) => empName(a).localeCompare(empName(b))),
-    [employees]
-  );
-
-  const save = async (e: Emp) => {
-    if (!user) return;
-    const raw = edits[e.id];
-    if (raw === undefined) return;
-    const value = parseFloat(raw);
-    if (!Number.isFinite(value) || value < 0) {
-      toast.error('Enter a valid salary amount');
-      return;
-    }
-    setSavingId(e.id);
-    const { error } = await supabase.from('employee_payroll').upsert(
-      { emp_id: e.id, salary: value, updated_at: new Date().toISOString(), updated_by: user.id },
-      { onConflict: 'emp_id' }
-    );
-    setSavingId(null);
-    if (error) {
-      toast.error(error.message || 'Could not save salary');
-      return;
-    }
-    toast.success(`Salary saved for ${empName(e)}`);
-    setEdits(prev => {
-      const next = { ...prev };
-      delete next[e.id];
-      return next;
-    });
-    onSaved();
-  };
-
-  return (
-    <div className="space-y-4">
-      <p className="text-xs text-slate-500 dark:text-slate-400">
-        Monthly fixed salary. Only admins and the employee themselves can see it. Existing salary slips are not changed
-        when you edit a salary here.
-      </p>
-      <Card>
-        <CardContent className="px-0 pt-4 sm:px-6">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Designation</TableHead>
-                  <TableHead>Joined</TableHead>
-                  <TableHead>Monthly salary (₹)</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {team.map(e => {
-                  const current = payroll.get(e.id);
-                  const value = edits[e.id] ?? (current !== undefined ? String(current) : '');
-                  const dirty = edits[e.id] !== undefined;
-                  return (
-                    <TableRow key={e.id}>
-                      <TableCell>
-                        <p className="font-medium">{empName(e)}</p>
-                        <p className="text-xs text-slate-500">{e.employee_code || '—'}</p>
-                      </TableCell>
-                      <TableCell className="text-slate-600 dark:text-slate-300">{e.designation || '—'}</TableCell>
-                      <TableCell className="whitespace-nowrap text-slate-600 dark:text-slate-300">
-                        {e.joining_date
-                          ? new Date(`${e.joining_date}T00:00:00`).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                          : '—'}
-                      </TableCell>
-                      <TableCell>
-                        <input
-                          type="number" min="0" step="0.01" className={cn(NUM_CLS, 'w-32')}
-                          value={value} placeholder={current === undefined ? 'Not set' : '0'}
-                          onChange={ev => setEdits(p => ({ ...p, [e.id]: ev.target.value }))}
-                        />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button size="sm" className="gap-1" disabled={!dirty || savingId === e.id} onClick={() => save(e)}>
-                          {savingId === e.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                          Save
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-                {team.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-slate-500">No active employees found.</TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-};
-
-// ═════════════════════════════════════════════════════════════════════════════
 // PAGE
 // ═════════════════════════════════════════════════════════════════════════════
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'slips', label: 'Salary Slips' },
   { id: 'incentives', label: 'Incentives' },
-  { id: 'salaries', label: 'Salaries' },
 ];
 
 const AdminPayrollPage: React.FC = () => {
@@ -858,7 +746,6 @@ const AdminPayrollPage: React.FC = () => {
         <>
           {tab === 'slips' && <SlipsTab employees={employees} payroll={payroll} refreshKey={refreshKey} />}
           {tab === 'incentives' && <IncentivesTab employees={employees} refreshKey={refreshKey} onSaved={bump} />}
-          {tab === 'salaries' && <SalariesTab employees={employees} payroll={payroll} onSaved={bump} />}
         </>
       )}
     </div>
