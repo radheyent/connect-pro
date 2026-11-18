@@ -1156,34 +1156,78 @@ const SummaryTab: React.FC<{
   onOpen: (s: DialogState) => void;
 }> = ({ employees, refreshKey, onOpen }) => {
   const today = istToday();
-  const months = useMemo(() => keptMonths(today), [today]);
-  const [month, setMonth] = useState(months[0]);
+  const kept = useMemo(() => keptMonths(today), [today]);
+  const [savedMonths, setSavedMonths] = useState<string[]>([]);
+  // Current + previous month (live) plus every older month that has a saved monthly summary
+  const months = useMemo(
+    () => Array.from(new Set([...kept, ...savedMonths])).sort().reverse().slice(0, 12),
+    [kept, savedMonths]
+  );
+  const [month, setMonth] = useState(kept[0]);
+  const isKept = kept.includes(month);
   const [summary, setSummary] = useState<SummaryRow[]>([]);
   const [records, setRecords] = useState<AttRow[]>([]);
   const [loading, setLoading] = useState(true);
   const req = useRef(0);
 
+  // Which older months have a saved summary?
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      const { data } = await supabase
+        .from('attendance_monthly_summary')
+        .select('month')
+        .order('month', { ascending: false })
+        .limit(1000);
+      if (!off) setSavedMonths(Array.from(new Set(((data as Array<{ month: string }> | null) ?? []).map(r => r.month))));
+    })();
+    return () => { off = true; };
+  }, [refreshKey]);
+
   const load = useCallback(async () => {
     const id = ++req.current;
     setLoading(true);
     try {
-      const { start, end } = monthRange(month);
-      const [sumRes, recs] = await Promise.all([
-        supabase.rpc('attendance_month_summary', { p_month: month }),
-        fetchAll<AttRow>((f, t) =>
-          supabase.from('attendance').select(COLS).gte('date', start).lt('date', end).order('date').range(f, t)
-        ),
-      ]);
-      if (sumRes.error) throw new Error(sumRes.error.message);
-      if (id !== req.current) return;
-      setSummary((sumRes.data as SummaryRow[]) ?? []);
-      setRecords(recs);
+      if (kept.includes(month)) {
+        const { start, end } = monthRange(month);
+        const [sumRes, recs] = await Promise.all([
+          supabase.rpc('attendance_month_summary', { p_month: month }),
+          fetchAll<AttRow>((f, t) =>
+            supabase.from('attendance').select(COLS).gte('date', start).lt('date', end).order('date').range(f, t)
+          ),
+        ]);
+        if (sumRes.error) throw new Error(sumRes.error.message);
+        if (id !== req.current) return;
+        setSummary((sumRes.data as SummaryRow[]) ?? []);
+        setRecords(recs);
+      } else {
+        // Older month: the daily rows are archived, so read the saved monthly summary
+        const { data, error } = await supabase.from('attendance_monthly_summary').select('*').eq('month', month);
+        if (error) throw new Error(error.message);
+        if (id !== req.current) return;
+        setSummary(
+          ((data as Array<Record<string, any>>) ?? []).map(r => ({
+            employee_id: r.emp_id,
+            present_days: r.present_days,
+            absent_days: r.absent_days,
+            half_days: r.half_days,
+            leave_days: r.leave_days,
+            weekoff_days: r.weekoff_days,
+            holiday_days: r.holiday_days,
+            payable_days: r.payable_days,
+            days_in_month: r.days_in_month,
+            marked_days: r.marked_days,
+            unmarked_days: r.unmarked_days,
+          }))
+        );
+        setRecords([]);
+      }
     } catch (e) {
       if (id === req.current) toast.error((e as Error).message || 'Could not load the summary');
     } finally {
       if (id === req.current) setLoading(false);
     }
-  }, [month]);
+  }, [month, kept]);
 
   useEffect(() => { load(); }, [load, refreshKey]);
 
@@ -1203,31 +1247,37 @@ const SummaryTab: React.FC<{
       .map(s => ({ s, e: empMap.get(s.employee_id) }))
       .filter(x => x.e && (isActive(x.e) || x.s.marked_days > 0))
       .sort((a, b) => empName(a.e).localeCompare(empName(b.e)))
-      .map(x => ({
-        s: x.s,
-        e: x.e as Emp,
-        unmarked: isActive(x.e as Emp)
-          ? unmarkedDatesOf(x.e as Emp, month, today, markedByEmp.get(x.s.employee_id) ?? new Set())
-          : [],
-      }));
-  }, [summary, empMap, month, today, markedByEmp]);
+      .map(x => {
+        const unmarked =
+          isKept && isActive(x.e as Emp)
+            ? unmarkedDatesOf(x.e as Emp, month, today, markedByEmp.get(x.s.employee_id) ?? new Set())
+            : [];
+        return {
+          s: x.s,
+          e: x.e as Emp,
+          unmarked,
+          // for archived months only the saved count exists, not the individual dates
+          unmarkedCount: isKept ? unmarked.length : x.s.unmarked_days,
+        };
+      });
+  }, [summary, empMap, month, today, markedByEmp, isKept]);
 
   const totals = useMemo(() => {
     const t = { p: 0, h: 0, l: 0, w: 0, o: 0, a: 0, u: 0, pay: 0 };
-    lines.forEach(({ s, unmarked }) => {
+    lines.forEach(({ s, unmarkedCount }) => {
       t.p += s.present_days; t.h += s.half_days; t.l += s.leave_days;
       t.w += s.weekoff_days; t.o += s.holiday_days; t.a += s.absent_days;
-      t.u += unmarked.length; t.pay += n(s.payable_days);
+      t.u += unmarkedCount; t.pay += n(s.payable_days);
     });
     return t;
   }, [lines]);
 
   const exportSummary = () => {
     const head = ['Emp Code', 'Name', 'Designation', 'Present', 'Half Day', 'Leave', 'Week Off', 'Holiday', 'Absent', 'Not Marked', 'Payable Days', 'Days In Month'];
-    const body = lines.map(({ s, e, unmarked }) => [
+    const body = lines.map(({ s, e, unmarkedCount }) => [
       e.employee_code ?? '', empName(e), e.designation ?? '',
       s.present_days, s.half_days, s.leave_days, s.weekoff_days, s.holiday_days, s.absent_days,
-      unmarked.length, fmtDays(s.payable_days), s.days_in_month,
+      unmarkedCount, fmtDays(s.payable_days), s.days_in_month,
     ]);
     downloadCsv(`attendance-summary-${month}.csv`, [head, ...body]);
   };
@@ -1262,7 +1312,8 @@ const SummaryTab: React.FC<{
       </div>
 
       <p className="text-xs text-slate-500 dark:text-slate-400">
-        Only the current and the previous month are kept here. Older attendance is archived from the HR Backup page.
+        Daily attendance is kept for the current and the previous month only. Older months show the saved monthly
+        summary (read-only), which is kept permanently.
         Payable Days = Present + Leave + Week Off + Holiday + (Half Day × 0.5). Click a red date to mark that day.
       </p>
 
@@ -1294,7 +1345,7 @@ const SummaryTab: React.FC<{
                       <TableCell colSpan={9} className="py-8 text-center text-slate-500">No data for this month.</TableCell>
                     </TableRow>
                   ) : (
-                    lines.map(({ s, e, unmarked }) => (
+                    lines.map(({ s, e, unmarked, unmarkedCount }) => (
                       <TableRow key={s.employee_id}>
                         <TableCell>
                           <p className="font-medium">{empName(e)}{isActive(e) ? '' : ' (inactive)'}</p>
@@ -1307,7 +1358,11 @@ const SummaryTab: React.FC<{
                         <TableCell className="text-center text-cyan-600">{s.holiday_days}</TableCell>
                         <TableCell className="text-center text-red-600">{s.absent_days}</TableCell>
                         <TableCell>
-                          <UnmarkedChips dates={unmarked} onPick={d => onOpen({ empId: s.employee_id, date: d })} />
+                          {isKept ? (
+                            <UnmarkedChips dates={unmarked} onPick={d => onOpen({ empId: s.employee_id, date: d })} />
+                          ) : (
+                            <span className="text-slate-500">{unmarkedCount > 0 ? unmarkedCount : '—'}</span>
+                          )}
                         </TableCell>
                         <TableCell className="whitespace-nowrap text-right font-bold tabular-nums">
                           {fmtDays(s.payable_days)} <span className="font-normal text-slate-500">/ {s.days_in_month}</span>

@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
-import { IndianRupee, Loader2, Printer, AlertTriangle, Save, FileText } from 'lucide-react';
+import { IndianRupee, Loader2, Printer, AlertTriangle, Save, FileText, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
@@ -117,6 +117,7 @@ const SlipsTab: React.FC<{
   const today = istToday();
   const months = useMemo(() => lastTwelveMonths(today), [today]);
   const [month, setMonth] = useState<string>(() => months[1] ?? months[0]); // payroll is usually for last month
+  const keptMonthList = useMemo(() => months.slice(0, 2), [months]);
 
   const [summary, setSummary] = useState<Map<string, SummaryRow>>(new Map());
   const [incentives, setIncentives] = useState<Map<string, number>>(new Map());
@@ -130,8 +131,12 @@ const SlipsTab: React.FC<{
     const id = ++req.current;
     setLoading(true);
     try {
+      // Current and previous month: live numbers. Older months: the saved monthly summary.
+      const sumPromise = keptMonthList.includes(month)
+        ? supabase.rpc('attendance_month_summary', { p_month: month })
+        : supabase.from('attendance_monthly_summary').select('*').eq('month', month);
       const [sumRes, incRes, slipRes] = await Promise.all([
-        supabase.rpc('attendance_month_summary', { p_month: month }),
+        sumPromise,
         supabase.from('incentives').select('emp_id,total_incentive').eq('month', month),
         supabase.from('salary_slips').select('*').eq('month', month),
       ]);
@@ -140,7 +145,22 @@ const SlipsTab: React.FC<{
       if (slipRes.error) throw new Error(slipRes.error.message);
       if (id !== req.current) return;
 
-      setSummary(new Map(((sumRes.data as SummaryRow[]) ?? []).map(r => [r.employee_id, r] as [string, SummaryRow])));
+      const sumRows: SummaryRow[] = keptMonthList.includes(month)
+        ? ((sumRes.data as SummaryRow[]) ?? [])
+        : ((sumRes.data as Array<Record<string, any>>) ?? []).map(r => ({
+            employee_id: r.emp_id,
+            present_days: r.present_days,
+            absent_days: r.absent_days,
+            half_days: r.half_days,
+            leave_days: r.leave_days,
+            weekoff_days: r.weekoff_days,
+            holiday_days: r.holiday_days,
+            payable_days: r.payable_days,
+            days_in_month: r.days_in_month,
+            marked_days: r.marked_days,
+            unmarked_days: r.unmarked_days,
+          }));
+      setSummary(new Map(sumRows.map(r => [r.employee_id, r] as [string, SummaryRow])));
       setIncentives(
         new Map(
           ((incRes.data as Array<{ emp_id: string; total_incentive: number | string | null }>) ?? []).map(
@@ -154,7 +174,7 @@ const SlipsTab: React.FC<{
     } finally {
       if (id === req.current) setLoading(false);
     }
-  }, [month]);
+  }, [month, keptMonthList]);
 
   useEffect(() => { setEdits({}); }, [month]);
   useEffect(() => { load(); }, [load, refreshKey]);
@@ -249,13 +269,28 @@ const SlipsTab: React.FC<{
   };
 
   const isCurrentMonth = month === today.slice(0, 7);
-  // Attendance older than the previous month is archived, so new slips cannot be calculated for it
-  const locked = month < (months[1] ?? months[0]);
+  // Older months have no raw attendance any more, so their numbers come from the saved monthly summary
+  const usesSaved = !keptMonthList.includes(month);
+  const noSavedData = usesSaved && !loading && summary.size === 0;
+
+  const deleteSlip = async (e: Emp) => {
+    if (!user || busy) return;
+    if (!window.confirm(`Delete the ${monthLabel(month)} salary slip of ${empName(e)}? The employee will no longer see it.`)) return;
+    setBusy(e.id);
+    const { error } = await supabase.from('salary_slips').delete().eq('emp_id', e.id).eq('month', month);
+    setBusy(null);
+    if (error) {
+      toast.error(error.message || 'Could not delete the slip');
+      return;
+    }
+    toast.success('Salary slip deleted');
+    await load();
+  };
 
   const generate = async (list: Emp[], busyKey: string) => {
     if (!user || busy) return;
-    if (locked) {
-      toast.error('Attendance for this month is archived. Slips can only be generated for the current and the previous month.');
+    if (noSavedData) {
+      toast.error('There is no saved attendance summary for this month, so a slip cannot be calculated.');
       return;
     }
     const ready = list.filter(hasSalary);
@@ -292,6 +327,11 @@ const SlipsTab: React.FC<{
         .upsert(ready.map(buildPayload), { onConflict: 'emp_id,month' });
       if (error) throw new Error(error.message);
       toast.success(`${ready.length} salary slip(s) generated`);
+      if (!usesSaved) {
+        // Keep the monthly summary permanently, so this slip can still be recalculated after the daily rows are archived
+        const snap = await supabase.rpc('snapshot_attendance_summary', { p_month: month });
+        if (snap.error) toast.warning('The monthly attendance summary could not be saved: ' + snap.error.message);
+      }
       await load();
     } catch (e) {
       toast.error((e as Error).message || 'Could not generate slips');
@@ -306,7 +346,7 @@ const SlipsTab: React.FC<{
         <MonthPicker value={month} onChange={setMonth} months={months} />
         <Button
           className="gap-2"
-          disabled={loading || !!busy || locked || team.length === 0}
+          disabled={loading || !!busy || noSavedData || team.length === 0}
           onClick={() => generate(team, 'all')}
         >
           {busy === 'all' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
@@ -314,10 +354,16 @@ const SlipsTab: React.FC<{
         </Button>
       </div>
 
-      {locked && (
+      {usesSaved && !noSavedData && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+          The daily attendance for {monthLabel(month)} has been archived. Payable days below come from the saved monthly
+          summary.
+        </div>
+      )}
+      {noSavedData && (
         <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-          Attendance for {monthLabel(month)} has been archived, so new slips cannot be calculated for it. Slips that were
-          already generated can still be printed.
+          There is no saved attendance summary for {monthLabel(month)}, so a new slip cannot be calculated. Slips that
+          were already generated can still be printed or deleted.
         </div>
       )}
 
@@ -441,10 +487,21 @@ const SlipsTab: React.FC<{
                                 <Printer className="h-3.5 w-3.5" />
                               </Button>
                             )}
+                            {slip && (
+                              <Button
+                                size="sm" variant="outline" className="mr-1 gap-1 text-red-600"
+                                disabled={!!busy}
+                                onClick={() => deleteSlip(e)}
+                                title="Delete this salary slip"
+                                aria-label="Delete salary slip"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               variant={slip ? 'outline' : 'default'}
-                              disabled={!!busy || noSalary || locked}
+                              disabled={!!busy || noSalary || noSavedData}
                               onClick={() => generate([e], e.id)}
                               className="gap-1"
                             >

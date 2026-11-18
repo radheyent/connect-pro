@@ -17,6 +17,18 @@ import { cn } from '@/lib/utils';
 // ─────────────────────────────────────────────────────────────────────────────
 type Status = 'present' | 'absent' | 'halfday' | 'leave' | 'weekoff' | 'holiday';
 
+interface HistoryRow {
+  month: string;
+  present_days: number;
+  half_days: number;
+  leave_days: number;
+  weekoff_days: number;
+  holiday_days: number;
+  absent_days: number;
+  payable_days: number | string;
+  days_in_month: number;
+}
+
 interface AttendanceRow {
   id: string;
   date: string; // YYYY-MM-DD
@@ -208,6 +220,7 @@ const MyAttendancePage: React.FC = () => {
   const [summary, setSummary] = useState<MonthSummary | null>(null);
   const [today, setToday] = useState<AttendanceRow | null>(null);
   const [missedDates, setMissedDates] = useState<string[]>([]);
+  const [history, setHistory] = useState<HistoryRow[]>([]);
   const [loadingMonth, setLoadingMonth] = useState(true);
   const [loadingToday, setLoadingToday] = useState(true);
   const [acting, setActing] = useState<'in' | 'out' | null>(null);
@@ -280,6 +293,22 @@ const MyAttendancePage: React.FC = () => {
     },
     [userId]
   );
+
+  // Earlier months come from the permanent monthly summary (the daily rows are archived)
+  useEffect(() => {
+    if (!userId) return;
+    let off = false;
+    (async () => {
+      const { data } = await supabase
+        .from('attendance_monthly_summary')
+        .select('month,present_days,half_days,leave_days,weekoff_days,holiday_days,absent_days,payable_days,days_in_month')
+        .eq('emp_id', userId)
+        .order('month', { ascending: false })
+        .limit(12);
+      if (!off) setHistory((data as HistoryRow[]) ?? []);
+    })();
+    return () => { off = true; };
+  }, [userId]);
 
   // Reload "today" at start and again if the India date rolls over while the app is open
   useEffect(() => {
@@ -592,6 +621,51 @@ const MyAttendancePage: React.FC = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* ── Earlier months (saved monthly summary) ────────────────────────── */}
+      {history.filter(h => !months.includes(h.month)).length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Earlier months</CardTitle>
+          </CardHeader>
+          <CardContent className="px-0 sm:px-6">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Month</TableHead>
+                    <TableHead className="text-center">Present</TableHead>
+                    <TableHead className="text-center">Half Day</TableHead>
+                    <TableHead className="text-center">Leave</TableHead>
+                    <TableHead className="text-center">Week Off</TableHead>
+                    <TableHead className="text-center">Holiday</TableHead>
+                    <TableHead className="text-center">Absent</TableHead>
+                    <TableHead className="text-right">Payable</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {history
+                    .filter(h => !months.includes(h.month))
+                    .map(h => (
+                      <TableRow key={h.month}>
+                        <TableCell className="whitespace-nowrap font-medium">{monthLabel(h.month)}</TableCell>
+                        <TableCell className="text-center">{h.present_days}</TableCell>
+                        <TableCell className="text-center">{h.half_days}</TableCell>
+                        <TableCell className="text-center">{h.leave_days}</TableCell>
+                        <TableCell className="text-center">{h.weekoff_days}</TableCell>
+                        <TableCell className="text-center">{h.holiday_days}</TableCell>
+                        <TableCell className="text-center">{h.absent_days}</TableCell>
+                        <TableCell className="whitespace-nowrap text-right font-bold tabular-nums">
+                          {fmtDays(h.payable_days)} <span className="font-normal text-slate-500">/ {h.days_in_month}</span>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 };

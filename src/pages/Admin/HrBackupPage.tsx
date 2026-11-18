@@ -38,6 +38,7 @@ interface Stats {
   kept: number;
   old: number;
   oldest: string | null;
+  savedMonths: number;
 }
 
 const IST = 'Asia/Kolkata';
@@ -172,7 +173,9 @@ const HrBackupPage: React.FC = () => {
         const { data } = await supabase.from('attendance').select('date').order('date', { ascending: true }).limit(1);
         oldest = (data as Array<{ date: string }> | null)?.[0]?.date ?? null;
       }
-      setStats({ total, kept: total - old, old, oldest });
+      const { data: monthRows } = await supabase.from('attendance_monthly_summary').select('month').limit(1000);
+      const savedMonths = new Set(((monthRows as Array<{ month: string }> | null) ?? []).map(r => r.month)).size;
+      setStats({ total, kept: total - old, old, oldest, savedMonths });
     } catch (e) {
       toast.error((e as Error).message || 'Could not read attendance counts');
     }
@@ -213,6 +216,9 @@ const HrBackupPage: React.FC = () => {
       } catch {
         toast.warning('Login emails could not be included in the backup');
       }
+
+      const monthly = await fetchAll<Record<string, any>>((f, t) =>
+        supabase.from('attendance_monthly_summary').select('*').order('month').range(f, t));
 
       const [details, payroll, incentives, slips, docs] = await Promise.all([
         fetchAll<{ emp_id: string; mobile_number: string | null; personal_email: string | null }>((f, t) =>
@@ -262,8 +268,16 @@ const HrBackupPage: React.FC = () => {
         'Path / Link': d.storage_path ?? d.file_url ?? '', Uploaded: d.created_at ? String(d.created_at).slice(0, 10) : '',
       }));
 
+      const monthlyRows = monthly.map(m => ({
+        Month: m.month, 'Emp Code': codeOf(m.emp_id), Name: nameOf(m.emp_id),
+        Present: m.present_days, 'Half Day': m.half_days, Leave: m.leave_days, 'Week Off': m.weekoff_days,
+        Holiday: m.holiday_days, Absent: m.absent_days, 'Payable Days': m.payable_days,
+        'Days In Month': m.days_in_month, 'Not Marked': m.unmarked_days, Final: m.finalized ? 'Yes' : 'No',
+      }));
+
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(employees), 'Employees');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(monthlyRows), 'Monthly Attendance');
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(incentiveRows), 'Incentives');
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(slipRows), 'Salary Slips');
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(docRows), 'Documents');
@@ -333,10 +347,14 @@ const HrBackupPage: React.FC = () => {
         setArchived(null);
         throw new Error('The old records changed since the Excel file was created. Download the archive again.');
       }
+      // Save the monthly summaries of every month first. Nothing is removed if this fails.
+      const snap = await supabase.rpc('snapshot_all_attendance_summaries');
+      if (snap.error) throw new Error('The monthly summaries could not be saved, so nothing was removed: ' + snap.error.message);
+
       const { error, count: removed } = await supabase
         .from('attendance').delete({ count: 'exact' }).lt('date', cutoff);
       if (error) throw new Error(error.message);
-      toast.success(`${removed ?? archived.count} old attendance records removed from the database`);
+      toast.success(`${removed ?? archived.count} old attendance records removed. The monthly summaries are saved.`);
       setArchived(null);
       setTyped('');
       await loadStats();
@@ -369,8 +387,8 @@ const HrBackupPage: React.FC = () => {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            Employees (with contact details and monthly salary), incentives, all salary slips and the list of uploaded
-            documents. The document files themselves stay in Supabase Storage.
+            Employees (with contact details and monthly salary), the saved monthly attendance summaries, incentives,
+            all salary slips and the list of uploaded documents. The document files themselves stay in Supabase Storage.
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <Button onClick={downloadHr} disabled={hrBusy} className="gap-2">
@@ -393,6 +411,10 @@ const HrBackupPage: React.FC = () => {
           <p className="text-sm text-slate-600 dark:text-slate-300">
             Only the current and the previous month stay in the database, which keeps the free Supabase storage small.
             Older months are saved to Excel first and then removed.
+          </p>
+
+          <p className="text-xs text-slate-500">
+            Saved monthly summaries (kept permanently): {stats ? `${stats.savedMonths} month(s)` : '…'}
           </p>
 
           <div className="grid grid-cols-3 gap-3 text-center">
@@ -421,8 +443,9 @@ const HrBackupPage: React.FC = () => {
             <p className="text-sm font-semibold">Archive old attendance</p>
             <p className="text-xs text-slate-600 dark:text-slate-300">
               Records before {cutoffLabel}
-              {stats?.oldest ? ` (oldest: ${stats.oldest})` : ''} will be removed from the database. Salary slips that
-              are already generated are not affected.
+              {stats?.oldest ? ` (oldest: ${stats.oldest})` : ''} will be removed from the database. The monthly summary
+              of every month is saved permanently first, so salary slips can still be generated for those months.
+              Slips that already exist are not affected.
             </p>
 
             <div className="space-y-2">
