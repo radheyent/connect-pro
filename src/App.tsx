@@ -15,8 +15,13 @@ import StoreExpensesPage from './pages/Admin/StoreExpensesPage';
 import FieldExpensesPage from './pages/Admin/FieldExpensesPage';
 import LedgerPage from './pages/Admin/LedgerPage';
 import BudgetPage from './pages/Admin/BudgetPage';
+import AdminHrPage from './pages/Admin/AdminHrPage';
 import EmployeeLeadsPage from './pages/Employee/EmployeeLeadsPage';
 import EmployeeExpensesPage from './pages/Employee/EmployeeExpensesPage';
+import MyAttendancePage from './pages/Employee/MyAttendancePage';
+import MySalaryPage from './pages/Employee/MySalaryPage';
+import MyDocumentsPage from './pages/Employee/MyDocumentsPage';
+import MyProfilePage from './pages/Employee/MyProfilePage';
 import AnnouncementsPage from './pages/AnnouncementsPage';
 import MyConveyancePage from './pages/FieldBoy/MyConveyancePage';
 import DashboardLayout from './components/layout/DashboardLayout';
@@ -118,6 +123,11 @@ function App() {
               <Route path="fake-calls" element={<FakeCallsPanel />} />
               <Route path="reports"    element={<ReportsPage />} />
               <Route path="backup"     element={<BackupPage />} />
+              <Route path="hr"         element={<AdminHrPage />} />
+              {/* old addresses keep working */}
+              <Route path="attendance" element={<Navigate to="/admin/hr?tab=attendance" replace />} />
+              <Route path="payroll"    element={<Navigate to="/admin/hr?tab=payroll" replace />} />
+              <Route path="hr-backup"  element={<Navigate to="/admin/hr?tab=backup" replace />} />
               <Route path="expenses/store" element={<StoreExpensesPage />} />
               <Route path="expenses/field" element={<FieldExpensesPage />} />
               <Route path="expenses/ledger" element={<LedgerPage />} />
@@ -137,6 +147,10 @@ function App() {
               <Route index            element={<EmployeeDashboard />} />
               <Route path="leads"     element={<EmployeeLeadsPage />} />
               <Route path="expenses"  element={<EmployeeExpensesPage />} />
+              <Route path="attendance" element={<MyAttendancePage />} />
+              <Route path="salary"     element={<MySalaryPage />} />
+              <Route path="documents"  element={<MyDocumentsPage />} />
+              <Route path="profile"    element={<MyProfilePage />} />
             </Route>
 
             {/* ── Field Boy routes ── */}

@@ -1,15 +1,12 @@
-import { createClient } from '@supabase/supabase-js';
+import { requireAdmin } from '../../_lib/requireAdmin.js';
 import * as XLSX from 'xlsx';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const supabaseAdmin = createClient(
-    process.env.VITE_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  );
+  const ctx = await requireAdmin(req, res);
+  if (!ctx) return;
+  const supabaseAdmin = ctx.admin;
 
   try {
     const { data: leads } = await supabaseAdmin.from('leads').select('*').order('created_date', { ascending: false });

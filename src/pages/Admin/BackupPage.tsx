@@ -29,6 +29,7 @@ const RESET_TABLES: Array<{ name: string; label: string }> = [
 // Tables always preserved
 const PRESERVE_LABELS = [
   'User Profiles (employees, admins, field boys)',
+  'HR data (attendance, salaries, slips, documents) - backed up separately in HR & Attendance Backup',
   'App Settings (km rate, etc.)',
   'Announcements',
 ];
@@ -36,10 +37,22 @@ const PRESERVE_LABELS = [
 const LAST_BACKUP_KEY = 'connectpro_last_backup';
 const LAST_RESET_KEY  = 'connectpro_last_reset';
 
+// Reads a whole table. The API returns at most 1000 rows per request, so read page by page.
 async function fetchTable(table: string): Promise<any[]> {
-  const { data, error } = await supabase.from(table).select('*');
-  if (error) { console.warn(`Fetch ${table}:`, error.message); return []; }
-  return data || [];
+  const PAGE = 1000;
+  const all: any[] = [];
+  for (let from = 0; ; from += PAGE) {
+    let res = await supabase.from(table).select('*').order('id', { ascending: true }).range(from, from + PAGE - 1);
+    if (res.error) {
+      // some tables have no "id" column: read that page without ordering
+      res = await supabase.from(table).select('*').range(from, from + PAGE - 1);
+    }
+    if (res.error) { console.warn(`Fetch ${table}:`, res.error.message); break; }
+    const page = res.data || [];
+    all.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return all;
 }
 
 function addSheet(wb: XLSX.WorkBook, rows: any[], name: string) {

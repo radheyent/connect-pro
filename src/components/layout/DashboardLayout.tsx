@@ -7,7 +7,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import {
   LayoutDashboard, Users, Share2, PhoneMissed,
   BarChart3, Database, LogOut, Menu, Sun, Moon,
-  Bell, Wallet, Car, Receipt, ExternalLink, Truck, BookOpenText, IndianRupee, ChevronDown, CalendarClock
+  Bell, Wallet, Car, Receipt, ExternalLink, Truck, BookOpenText, IndianRupee, ChevronDown, CalendarClock,
+  CalendarCheck, FileText, FolderOpen, IdCard, Briefcase
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -22,6 +23,10 @@ const PAGE_TITLES: Record<string, string> = {
   '/admin/fake-calls':        'Fake Calls',
   '/admin/reports':           'Reports',
   '/admin/backup':            'Backup & Reset',
+  '/admin/hr':                'HR & Payroll',
+  '/admin/attendance':        'Attendance',
+  '/admin/payroll':           'Payroll',
+  '/admin/hr-backup':         'HR & Attendance Backup',
   '/admin/expenses/store':     'Store Expenses',
   '/admin/expenses/field':     'Field Expenses',
   '/admin/expenses/ledger':    'Ledger',
@@ -29,6 +34,10 @@ const PAGE_TITLES: Record<string, string> = {
   '/employee':                'My Dashboard',
   '/employee/leads':          'My Leads',
   '/employee/expenses':       'My Expenses',
+  '/employee/attendance':     'My Attendance',
+  '/employee/salary':         'My Salary Slips',
+  '/employee/documents':      'My Documents',
+  '/employee/profile':        'My Profile',
   '/field-boy':               'Field Closure Desk',
   '/field-boy/conveyance':    'My Conveyance',
   '/announcements':           'Announcements',
@@ -102,6 +111,7 @@ const DashboardLayout: React.FC = () => {
       // ── Admin ──
       { name: 'Dashboard',      path: dashPath,              icon: LayoutDashboard, roles: ['admin','employee','field_boy'] },
       { name: 'Employees',      path: '/admin/employees',    icon: Users,           roles: ['admin'] },
+      { name: 'HR & Payroll',   path: '/admin/hr',           icon: Briefcase,       roles: ['admin'] },
       { name: 'All Leads',      path: '/admin/leads',        icon: Share2,          roles: ['admin'] },
       { name: 'Follow-ups',     path: '/admin/followups',    icon: CalendarClock,   roles: ['admin'] },
       { name: 'Fake Calls',     path: '/admin/fake-calls',   icon: PhoneMissed,     roles: ['admin'] },
@@ -116,11 +126,14 @@ const DashboardLayout: React.FC = () => {
       // ── Employee ──
       { name: 'My Leads',       path: '/employee/leads',     icon: Users,           roles: ['employee'] },
       { name: 'My Expenses',    path: '/employee/expenses',  icon: Receipt,         roles: ['employee'] },
+      { name: 'My Attendance',  path: '/employee/attendance', icon: CalendarCheck,  roles: ['employee'] },
+      { name: 'My Salary',      path: '/employee/salary',    icon: FileText,        roles: ['employee'] },
+      { name: 'My Documents',   path: '/employee/documents', icon: FolderOpen,      roles: ['employee'] },
+      { name: 'My Profile',     path: '/employee/profile',   icon: IdCard,          roles: ['employee'] },
       // ── Field Boy ──
       { name: 'My Conveyance',  path: '/field-boy/conveyance', icon: Car,           roles: ['field_boy'] },
       // ── Shared ──
       { name: 'Announcements',  path: '/announcements',      icon: Bell,            roles: ['admin','employee','field_boy'] },
-      { name: 'Attendance',     path: 'external',            url: 'https://script.google.com/macros/s/AKfycbyRxMMBPeEOPWHBi4rWSQ_tneLOxgltRsnP6aCwSp34-zsHx-XWQtfMHoatY7RdZwX3/exec', icon: ExternalLink, roles: ['admin','employee'] },
     ];
 
     return all.filter(item => item.roles.includes(role));

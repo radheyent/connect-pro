@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase, UserProfile } from '@/lib/supabase';
+import { adminFetch } from '@/lib/adminApi';
 import {
   Table,
   TableBody,
@@ -26,7 +27,8 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select';
-import { UserPlus, Mail, Lock, Phone, Pencil, Trash2, Clock, AlertTriangle } from 'lucide-react';
+import { UserPlus, Mail, Lock, Phone, Pencil, Trash2, Clock, AlertTriangle, IdCard } from 'lucide-react';
+import EmployeeDetailsDialog from '@/components/admin/EmployeeDetailsDialog';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -43,6 +45,7 @@ const EmployeeManagement: React.FC = () => {
   });
 
   const [editTarget, setEditTarget] = useState<UserProfile | null>(null);
+  const [detailsTarget, setDetailsTarget] = useState<UserProfile | null>(null);
   const [editData, setEditData] = useState({ name: '', email: '', role: 'employee', password: '' });
   const [saving, setSaving] = useState(false);
 
@@ -67,7 +70,7 @@ const EmployeeManagement: React.FC = () => {
         return;
       }
 
-      const res = await fetch('/api/admin/employees/list');
+      const res = await adminFetch('/api/admin/employees/list');
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Load failed');
       setEmployees(result.employees || []);
@@ -88,7 +91,7 @@ const EmployeeManagement: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch('/api/admin/employees/create', {
+      const res = await adminFetch('/api/admin/employees/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
@@ -130,7 +133,7 @@ const EmployeeManagement: React.FC = () => {
     if (!editTarget) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/admin/employees/update', {
+      const res = await adminFetch('/api/admin/employees/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -158,7 +161,7 @@ const EmployeeManagement: React.FC = () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const res = await fetch('/api/admin/employees/delete', {
+      const res = await adminFetch('/api/admin/employees/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: deleteTarget.id }),
@@ -210,7 +213,7 @@ const EmployeeManagement: React.FC = () => {
               ) : employees.map((emp) => (
                 <TableRow key={emp.id} className={cn("hover:bg-slate-50 transition-colors", !emp.is_active && 'opacity-60 grayscale')}>
                   <TableCell className="p-4 font-medium text-slate-900">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 cursor-pointer" onClick={() => setDetailsTarget(emp)} title="View full details">
                       <div className="h-9 w-9 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-bold ring-2 ring-slate-100 shadow-inner shrink-0">
                           {emp.name.split(' ').map(n => n[0]).join('').toUpperCase()}
                       </div>
@@ -273,6 +276,15 @@ const EmployeeManagement: React.FC = () => {
                       <Button
                         variant="ghost"
                         size="sm"
+                        className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-50"
+                        onClick={() => setDetailsTarget(emp)}
+                        title="Full details"
+                      >
+                        <IdCard className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         className="h-8 w-8 p-0 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                         onClick={() => openEdit(emp)}
                         title="Edit"
@@ -316,7 +328,7 @@ const EmployeeManagement: React.FC = () => {
           ) : employees.map((emp) => (
             <div key={emp.id} className={cn("p-4 flex flex-col gap-3", !emp.is_active && 'opacity-60 grayscale')}>
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3 min-w-0">
+                <div className="flex items-center gap-3 min-w-0 cursor-pointer" onClick={() => setDetailsTarget(emp)}>
                   <div className="h-8 w-8 rounded-full bg-slate-800 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
                     {emp.name.split(' ').map(n => n[0]).join('').toUpperCase()}
                   </div>
@@ -343,6 +355,14 @@ const EmployeeManagement: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-2 pt-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-[10px] font-bold uppercase flex-1 text-blue-600"
+                  onClick={() => setDetailsTarget(emp)}
+                >
+                  <IdCard className="h-3 w-3 mr-1" /> Details
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -375,6 +395,13 @@ const EmployeeManagement: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {/* Full details (profile, salary, documents) */}
+      <EmployeeDetailsDialog
+        employee={detailsTarget}
+        onClose={() => setDetailsTarget(null)}
+        onSaved={fetchEmployees}
+      />
 
       {/* Add Modal */}
       <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>

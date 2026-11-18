@@ -1,16 +1,11 @@
-import { createClient } from '@supabase/supabase-js';
+import { requireAdmin } from '../../_lib/requireAdmin.js';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const supabaseAdmin = createClient(
-    process.env.VITE_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  );
+  const ctx = await requireAdmin(req, res);
+  if (!ctx) return;
+  const supabaseAdmin = ctx.admin;
 
   try {
     const { data: profiles, error: profileError } = await supabaseAdmin
@@ -41,6 +36,6 @@ export default async function handler(req, res) {
     res.status(200).json({ employees: merged });
   } catch (error) {
     console.error('Employee list error:', error);
-    res.status(400).json({ error: error.message || 'Employees load nahi ho paaye' });
+    res.status(400).json({ error: error.message || 'Could not load employees' });
   }
 }
