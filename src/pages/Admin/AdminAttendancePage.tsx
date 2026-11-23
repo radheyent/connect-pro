@@ -11,10 +11,21 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import {
-  CalendarCheck, RefreshCw, Pencil, Trash2, Plus, Download, Loader2, Users, Wand2,
+  CalendarCheck, RefreshCw, Pencil, Trash2, Plus, Download, Loader2, Users, Wand2, Save,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import {
+  DEFAULT_SETTINGS,
+  dayHours,
+  fetchAttendanceSettings,
+  firstOfPreviousMonth,
+  fmtMinutes,
+  avgMinutes,
+  type AttendanceSettings,
+  type LateFlag,
+  type WeekoffFlag,
+} from '@/lib/attendanceRules';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Types
@@ -55,6 +66,8 @@ interface SummaryRow {
   days_in_month: number;
   marked_days: number;
   unmarked_days: number;
+  worked_minutes?: number;
+  timed_days?: number;
 }
 
 interface DialogState {
@@ -70,7 +83,7 @@ interface BulkLine {
   remarks: string;
 }
 
-type Tab = 'live' | 'mark' | 'fix' | 'records' | 'summary';
+type Tab = 'live' | 'mark' | 'review' | 'records' | 'summary' | 'rules';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Constants + helpers  (all dates are India dates, same as the database)
@@ -130,11 +143,7 @@ const fmt24 = (t: string | null): string => {
 const inOf = (r: AttRow): string => (r.check_in_at ? fmtIso(r.check_in_at) : fmt24(r.in_time));
 const outOf = (r: AttRow): string => (r.check_out_at ? fmtIso(r.check_out_at) : fmt24(r.out_time));
 
-const workedOf = (r: AttRow): string => {
-  if (!r.check_in_at || !r.check_out_at) return '—';
-  const mins = Math.max(0, Math.round((new Date(r.check_out_at).getTime() - new Date(r.check_in_at).getTime()) / 60000));
-  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
-};
+const workedOf = (r: AttRow): string => dayHours(r.status, r);
 
 /** ISO timestamp -> 'HH:MM' in India time (for <input type="time">) */
 const isoToHHMM = (iso: string | null): string =>
@@ -224,6 +233,63 @@ const StatusBadge: React.FC<{ status: Status }> = ({ status }) => (
   <span className={cn('inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold', STATUS_META[status]?.badge)}>
     {STATUS_META[status]?.label ?? status}
   </span>
+);
+
+/** Late / early and weekly-off flags for a date range, keyed by the attendance row id */
+function useFlags(from: string, to: string, refreshKey: number) {
+  const [late, setLate] = useState<Map<string, LateFlag>>(new Map());
+  const [weekoff, setWeekoff] = useState<Map<string, WeekoffFlag>>(new Map());
+
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      if (!from || !to) return;
+      const [l, w] = await Promise.all([
+        supabase.rpc('attendance_late_flags', { p_from: from, p_to: to }),
+        supabase.rpc('attendance_weekoff_flags', { p_from: from, p_to: to }),
+      ]);
+      if (off) return;
+      setLate(new Map(((l.data as LateFlag[] | null) ?? []).map(f => [f.att_id, f] as [string, LateFlag])));
+      setWeekoff(new Map(((w.data as WeekoffFlag[] | null) ?? []).map(f => [f.att_id, f] as [string, WeekoffFlag])));
+    })();
+    return () => { off = true; };
+  }, [from, to, refreshKey]);
+
+  return { late, weekoff };
+}
+
+const isHot = (late?: LateFlag, weekoff?: WeekoffFlag): boolean =>
+  !!((late?.eligible && !late.reviewed) || (weekoff && !weekoff.reviewed));
+
+const appendNote = (existing: string | null, note: string): string =>
+  [existing, note].filter(Boolean).join(' | ');
+
+const FlagBadges: React.FC<{ late?: LateFlag; weekoff?: WeekoffFlag }> = ({ late, weekoff }) => (
+  <>
+    {late?.eligible && !late.reviewed && (
+      <span
+        className="ml-1.5 inline-flex rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-bold text-white"
+        title={`Late or left early on ${late.streak} working days in a row. Review it in the Review tab.`}
+      >
+        Half day eligible
+      </span>
+    )}
+    {late?.flagged && (
+      <span className="ml-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+        {late.late_minutes > 0 ? `late ${late.late_minutes}m` : ''}
+        {late.late_minutes > 0 && late.early_minutes > 0 ? ', ' : ''}
+        {late.early_minutes > 0 ? `left early ${late.early_minutes}m` : ''}
+      </span>
+    )}
+    {weekoff && !weekoff.reviewed && (
+      <span
+        className="ml-1.5 inline-flex rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white"
+        title="Absent or on leave on both Saturday and Monday. Review it in the Review tab."
+      >
+        Weekly off not earned
+      </span>
+    )}
+  </>
 );
 
 const Stat: React.FC<{ label: string; value: number | string; tone?: string }> = ({ label, value, tone }) => (
@@ -436,6 +502,7 @@ const LiveTab: React.FC<{
   const [rows, setRows] = useState<AttRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [today, setToday] = useState(istToday());
+  const { late, weekoff } = useFlags(today, today, refreshKey);
 
   const load = useCallback(async () => {
     const t = istToday();
@@ -517,13 +584,16 @@ const LiveTab: React.FC<{
                     team.map(e => {
                       const r = byEmp.get(e.id);
                       return (
-                        <TableRow key={e.id}>
+                        <TableRow
+                          key={e.id}
+                          className={cn(r && isHot(late.get(r.id), weekoff.get(r.id)) && 'bg-amber-50/70 dark:bg-amber-950/20')}
+                        >
                           <TableCell>
                             <p className="font-medium">{empName(e)}</p>
                             <p className="text-xs text-slate-500">{e.employee_code || '—'}{e.designation ? ` · ${e.designation}` : ''}</p>
                           </TableCell>
                           <TableCell>
-                            {r ? <StatusBadge status={r.status} /> : (
+                            {r ? <><StatusBadge status={r.status} /><FlagBadges late={late.get(r.id)} weekoff={weekoff.get(r.id)} /></> : (
                               <span className="inline-flex rounded-full border border-dashed border-slate-300 px-2.5 py-0.5 text-xs text-slate-500 dark:border-slate-700">Not marked</span>
                             )}
                           </TableCell>
@@ -1042,6 +1112,7 @@ const RecordsTab: React.FC<{
   const [empFilter, setEmpFilter] = useState('');
   const [from, setFrom] = useState(() => `${istToday().slice(0, 7)}-01`);
   const [to, setTo] = useState(istToday());
+  const { late, weekoff } = useFlags(from, to, refreshKey);
   const [rows, setRows] = useState<AttRow[]>([]);
   const [loading, setLoading] = useState(true);
   const req = useRef(0);
@@ -1120,10 +1191,16 @@ const RecordsTab: React.FC<{
                   </TableRow>
                 ) : (
                   rows.map(r => (
-                    <TableRow key={r.id}>
+                    <TableRow
+                      key={r.id}
+                      className={cn(isHot(late.get(r.id), weekoff.get(r.id)) && 'bg-amber-50/70 dark:bg-amber-950/20')}
+                    >
                       <TableCell className="whitespace-nowrap font-medium">{dayLabel(r.date)}</TableCell>
                       <TableCell className="whitespace-nowrap">{empName(empMap.get(r.emp_id))}</TableCell>
-                      <TableCell><StatusBadge status={r.status} /></TableCell>
+                      <TableCell>
+                        <StatusBadge status={r.status} />
+                        <FlagBadges late={late.get(r.id)} weekoff={weekoff.get(r.id)} />
+                      </TableCell>
                       <TableCell className="whitespace-nowrap">{inOf(r)}</TableCell>
                       <TableCell className="whitespace-nowrap">{outOf(r)}</TableCell>
                       <TableCell className="max-w-[200px] truncate text-slate-500">{r.remarks || '—'}</TableCell>
@@ -1218,6 +1295,8 @@ const SummaryTab: React.FC<{
             days_in_month: r.days_in_month,
             marked_days: r.marked_days,
             unmarked_days: r.unmarked_days,
+            worked_minutes: r.worked_minutes ?? 0,
+            timed_days: r.timed_days ?? 0,
           }))
         );
         setRecords([]);
@@ -1263,21 +1342,24 @@ const SummaryTab: React.FC<{
   }, [summary, empMap, month, today, markedByEmp, isKept]);
 
   const totals = useMemo(() => {
-    const t = { p: 0, h: 0, l: 0, w: 0, o: 0, a: 0, u: 0, pay: 0 };
+    const t = { p: 0, h: 0, l: 0, w: 0, o: 0, a: 0, u: 0, pay: 0, wm: 0, td: 0 };
     lines.forEach(({ s, unmarkedCount }) => {
       t.p += s.present_days; t.h += s.half_days; t.l += s.leave_days;
       t.w += s.weekoff_days; t.o += s.holiday_days; t.a += s.absent_days;
       t.u += unmarkedCount; t.pay += n(s.payable_days);
+      t.wm += s.worked_minutes ?? 0; t.td += s.timed_days ?? 0;
     });
     return t;
   }, [lines]);
 
   const exportSummary = () => {
-    const head = ['Emp Code', 'Name', 'Designation', 'Present', 'Half Day', 'Leave', 'Week Off', 'Holiday', 'Absent', 'Not Marked', 'Payable Days', 'Days In Month'];
+    const head = ['Emp Code', 'Name', 'Designation', 'Present', 'Half Day', 'Leave', 'Week Off', 'Holiday', 'Absent', 'Not Marked', 'Payable Days', 'Days In Month', 'Total Hours', 'Avg Hours / Day'];
     const body = lines.map(({ s, e, unmarkedCount }) => [
       e.employee_code ?? '', empName(e), e.designation ?? '',
       s.present_days, s.half_days, s.leave_days, s.weekoff_days, s.holiday_days, s.absent_days,
       unmarkedCount, fmtDays(s.payable_days), s.days_in_month,
+      ((s.worked_minutes ?? 0) / 60).toFixed(1),
+      s.timed_days ? ((s.worked_minutes ?? 0) / s.timed_days / 60).toFixed(1) : '',
     ]);
     downloadCsv(`attendance-summary-${month}.csv`, [head, ...body]);
   };
@@ -1336,13 +1418,14 @@ const SummaryTab: React.FC<{
                     <TableHead className="text-center">H</TableHead>
                     <TableHead className="text-center">A</TableHead>
                     <TableHead>Not marked</TableHead>
+                    <TableHead className="text-right">Working hours</TableHead>
                     <TableHead className="text-right">Payable</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {lines.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="py-8 text-center text-slate-500">No data for this month.</TableCell>
+                      <TableCell colSpan={10} className="py-8 text-center text-slate-500">No data for this month.</TableCell>
                     </TableRow>
                   ) : (
                     lines.map(({ s, e, unmarked, unmarkedCount }) => (
@@ -1364,6 +1447,14 @@ const SummaryTab: React.FC<{
                             <span className="text-slate-500">{unmarkedCount > 0 ? unmarkedCount : '—'}</span>
                           )}
                         </TableCell>
+                        <TableCell className="whitespace-nowrap text-right tabular-nums">
+                          {s.timed_days ? fmtMinutes(s.worked_minutes) : '—'}
+                          {s.timed_days ? (
+                            <span className="block text-[11px] text-slate-500">
+                              avg {fmtMinutes(avgMinutes(s.worked_minutes, s.timed_days))} / day
+                            </span>
+                          ) : null}
+                        </TableCell>
                         <TableCell className="whitespace-nowrap text-right font-bold tabular-nums">
                           {fmtDays(s.payable_days)} <span className="font-normal text-slate-500">/ {s.days_in_month}</span>
                         </TableCell>
@@ -1380,6 +1471,7 @@ const SummaryTab: React.FC<{
                       <TableCell className="text-center">{totals.o}</TableCell>
                       <TableCell className="text-center">{totals.a}</TableCell>
                       <TableCell>{totals.u}</TableCell>
+                      <TableCell className="text-right tabular-nums">{totals.td ? fmtMinutes(totals.wm) : '—'}</TableCell>
                       <TableCell className="text-right tabular-nums">{fmtDays(totals.pay)}</TableCell>
                     </TableRow>
                   )}
@@ -1390,6 +1482,449 @@ const SummaryTab: React.FC<{
         </CardContent>
       </Card>
     </div>
+  );
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// REVIEW — late / early leave: half day eligible
+//   3 working days in a row with a late arrival or early leave of 15+ minutes.
+//   Only highlighted here. Nothing changes until the admin decides.
+// ═════════════════════════════════════════════════════════════════════════════
+const HalfDaySection: React.FC<{
+  employees: Emp[];
+  refreshKey: number;
+  onSaved: () => void;
+}> = ({ employees, refreshKey, onSaved }) => {
+  const { user } = useAuth();
+  const [flags, setFlags] = useState<LateFlag[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+
+  const empMap = useMemo(() => new Map(employees.map(e => [e.id, e] as [string, Emp])), [employees]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase.rpc('attendance_late_flags', {
+      p_from: firstOfPreviousMonth(),
+      p_to: istToday(),
+    });
+    if (error) {
+      toast.error(error.message || 'Could not load the late / early review');
+    } else {
+      setFlags(
+        ((data as LateFlag[]) ?? [])
+          .filter(f => f.eligible && !f.reviewed)
+          .sort((a, b) => b.att_date.localeCompare(a.att_date))
+      );
+      setPicked(new Set());
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load, refreshKey]);
+
+  const toggle = (id: string) =>
+    setPicked(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  const act = async (list: LateFlag[], action: 'halfday' | 'dismiss') => {
+    if (!user || busy || list.length === 0) return;
+    const text =
+      action === 'halfday'
+        ? `Change ${list.length} day(s) to Half Day?`
+        : `Dismiss ${list.length} day(s)? They will stay as they are.`;
+    if (!window.confirm(text)) return;
+
+    setBusy(true);
+    const results = await Promise.all(
+      list.map(f =>
+        supabase
+          .from('attendance')
+          .update(
+            action === 'halfday'
+              ? {
+                  status: 'halfday',
+                  flag_reviewed: true,
+                  marked_by: user.id,
+                  remarks: appendNote(f.remarks, 'Half day: late / early leave on consecutive days (approved by admin)'),
+                }
+              : { flag_reviewed: true }
+          )
+          .eq('id', f.att_id)
+      )
+    );
+    setBusy(false);
+    const failed = results.filter(r => r.error).length;
+    if (failed) toast.error(`${failed} record(s) could not be updated`);
+    else toast.success(action === 'halfday' ? 'Changed to Half Day' : 'Dismissed');
+    onSaved();
+    await load();
+  };
+
+  const chosen = flags.filter(f => picked.has(f.att_id));
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
+          <span>Late or early leave: half day eligible ({flags.length})</span>
+          <span className="flex gap-2">
+            <Button size="sm" disabled={busy || chosen.length === 0} onClick={() => act(chosen, 'halfday')}>
+              Mark selected as Half Day
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy || chosen.length === 0} onClick={() => act(chosen, 'dismiss')}>
+              Dismiss selected
+            </Button>
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 px-0 sm:px-6">
+        <p className="px-4 text-xs text-slate-500 dark:text-slate-400 sm:px-0">
+          An employee who is present but arrives late or leaves early by the grace time or more, on several working days
+          in a row, appears here on the last day of the run. Week offs and holidays do not break a run; an absence,
+          leave, half day or an unmarked day does. Nothing is changed automatically.
+        </p>
+        {loading ? (
+          <div className="space-y-2 px-4 sm:px-0">
+            {[0, 1].map(i => <Skeleton key={i} className="h-10 w-full" />)}
+          </div>
+        ) : flags.length === 0 ? (
+          <p className="px-4 py-4 text-center text-sm text-slate-500 sm:px-0">Nothing to review.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10" />
+                  <TableHead>Date</TableHead>
+                  <TableHead>Employee</TableHead>
+                  <TableHead>In</TableHead>
+                  <TableHead>Out</TableHead>
+                  <TableHead>Run</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {flags.map(f => (
+                  <TableRow key={f.att_id} className="bg-amber-50/70 dark:bg-amber-950/20">
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-blue-600"
+                        checked={picked.has(f.att_id)}
+                        onChange={() => toggle(f.att_id)}
+                        aria-label="Select row"
+                      />
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap font-medium">{dayLabel(f.att_date)}</TableCell>
+                    <TableCell className="whitespace-nowrap">{empName(empMap.get(f.employee_id))}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {f.in_t ? fmt24(f.in_t) : '—'}
+                      {f.late_minutes > 0 && <span className="ml-1 text-xs text-amber-700">(late {f.late_minutes}m)</span>}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {f.out_t ? fmt24(f.out_t) : '—'}
+                      {f.early_minutes > 0 && <span className="ml-1 text-xs text-amber-700">(early {f.early_minutes}m)</span>}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">Day {f.streak} in a row</TableCell>
+                    <TableCell className="whitespace-nowrap text-right">
+                      <Button size="sm" className="mr-1" disabled={busy} onClick={() => act([f], 'halfday')}>
+                        Half Day
+                      </Button>
+                      <Button size="sm" variant="outline" disabled={busy} onClick={() => act([f], 'dismiss')}>
+                        Dismiss
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// REVIEW — Sunday weekly off
+//   Not earned when the employee is absent or on leave on BOTH the Saturday
+//   before and the Monday after. Only highlighted: the admin removes it or keeps it.
+// ═════════════════════════════════════════════════════════════════════════════
+const WeekoffSection: React.FC<{
+  employees: Emp[];
+  refreshKey: number;
+  onSaved: () => void;
+}> = ({ employees, refreshKey, onSaved }) => {
+  const { user } = useAuth();
+  const [flags, setFlags] = useState<WeekoffFlag[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+
+  const empMap = useMemo(() => new Map(employees.map(e => [e.id, e] as [string, Emp])), [employees]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase.rpc('attendance_weekoff_flags', {
+      p_from: firstOfPreviousMonth(),
+      p_to: istToday(),
+    });
+    if (error) {
+      toast.error(error.message || 'Could not load the weekly off review');
+    } else {
+      setFlags(((data as WeekoffFlag[]) ?? []).filter(f => !f.reviewed).sort((a, b) => b.att_date.localeCompare(a.att_date)));
+      setPicked(new Set());
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load, refreshKey]);
+
+  const toggle = (id: string) =>
+    setPicked(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  const act = async (list: WeekoffFlag[], action: 'remove' | 'keep') => {
+    if (!user || busy || list.length === 0) return;
+    const text =
+      action === 'remove'
+        ? `Remove the weekly off for ${list.length} Sunday(s)? They will be marked Absent.`
+        : `Keep the weekly off for ${list.length} Sunday(s)?`;
+    if (!window.confirm(text)) return;
+
+    setBusy(true);
+    const results = await Promise.all(
+      list.map(f =>
+        supabase
+          .from('attendance')
+          .update(
+            action === 'remove'
+              ? {
+                  status: 'absent',
+                  in_time: null,
+                  out_time: null,
+                  check_in_at: null,
+                  check_out_at: null,
+                  flag_reviewed: true,
+                  marked_by: user.id,
+                  remarks: appendNote(f.remarks, 'Weekly off removed: absent or on leave on both Saturday and Monday (approved by admin)'),
+                }
+              : { flag_reviewed: true }
+          )
+          .eq('id', f.att_id)
+      )
+    );
+    setBusy(false);
+    const failed = results.filter(r => r.error).length;
+    if (failed) toast.error(`${failed} record(s) could not be updated`);
+    else toast.success(action === 'remove' ? 'Weekly off removed' : 'Weekly off kept');
+    onSaved();
+    await load();
+  };
+
+  const chosen = flags.filter(f => picked.has(f.att_id));
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
+          <span>Sunday weekly off not earned ({flags.length})</span>
+          <span className="flex gap-2">
+            <Button size="sm" disabled={busy || chosen.length === 0} onClick={() => act(chosen, 'remove')}>
+              Remove weekly off
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy || chosen.length === 0} onClick={() => act(chosen, 'keep')}>
+              Keep weekly off
+            </Button>
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 px-0 sm:px-6">
+        <p className="px-4 text-xs text-slate-500 dark:text-slate-400 sm:px-0">
+          The Sunday weekly off is earned unless the employee is absent or on leave on both the Saturday before and the
+          Monday after. If either day is Present or Half Day, the weekly off stays. These Sundays are marked Week Off
+          now, which counts as a paid day, so the admin decides: remove it (the day becomes Absent) or keep it.
+        </p>
+        {loading ? (
+          <div className="space-y-2 px-4 sm:px-0">
+            {[0, 1].map(i => <Skeleton key={i} className="h-10 w-full" />)}
+          </div>
+        ) : flags.length === 0 ? (
+          <p className="px-4 py-4 text-center text-sm text-slate-500 sm:px-0">Nothing to review.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10" />
+                  <TableHead>Sunday</TableHead>
+                  <TableHead>Employee</TableHead>
+                  <TableHead>Saturday</TableHead>
+                  <TableHead>Monday</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {flags.map(f => (
+                  <TableRow key={f.att_id} className="bg-red-50/60 dark:bg-red-950/20">
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-blue-600"
+                        checked={picked.has(f.att_id)}
+                        onChange={() => toggle(f.att_id)}
+                        aria-label="Select row"
+                      />
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap font-medium">{dayLabel(f.att_date)}</TableCell>
+                    <TableCell className="whitespace-nowrap">{empName(empMap.get(f.employee_id))}</TableCell>
+                    <TableCell><StatusBadge status={f.saturday_status as Status} /></TableCell>
+                    <TableCell><StatusBadge status={f.monday_status as Status} /></TableCell>
+                    <TableCell className="whitespace-nowrap text-right">
+                      <Button size="sm" className="mr-1" disabled={busy} onClick={() => act([f], 'remove')}>
+                        Remove
+                      </Button>
+                      <Button size="sm" variant="outline" disabled={busy} onClick={() => act([f], 'keep')}>
+                        Keep
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+
+const ReviewTab: React.FC<{
+  employees: Emp[];
+  refreshKey: number;
+  onSaved: () => void;
+}> = ({ employees, refreshKey, onSaved }) => (
+  <div className="space-y-6">
+    <HalfDaySection employees={employees} refreshKey={refreshKey} onSaved={onSaved} />
+    <WeekoffSection employees={employees} refreshKey={refreshKey} onSaved={onSaved} />
+    <FixTab employees={employees} refreshKey={refreshKey} onSaved={onSaved} />
+  </div>
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// RULES — editable times and numbers
+// ═════════════════════════════════════════════════════════════════════════════
+const RulesTab: React.FC = () => {
+  const { user } = useAuth();
+  const [form, setForm] = useState<AttendanceSettings>(DEFAULT_SETTINGS);
+  const [original, setOriginal] = useState<AttendanceSettings>(DEFAULT_SETTINGS);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let off = false;
+    fetchAttendanceSettings().then(s => {
+      if (off) return;
+      setForm(s);
+      setOriginal(s);
+      setLoading(false);
+    });
+    return () => { off = true; };
+  }, []);
+
+  const set = (patch: Partial<AttendanceSettings>) => setForm(prev => ({ ...prev, ...patch }));
+  const dirty = JSON.stringify(form) !== JSON.stringify(original);
+
+  const save = async () => {
+    if (!user) return;
+    if (form.shift_end <= form.shift_start) { toast.error('The shift end must be later than the shift start'); return; }
+    if (form.halfday_before < form.shift_start || form.halfday_before > form.shift_end) {
+      toast.error('The half-day time must be inside the shift'); return;
+    }
+    if (!Number.isFinite(form.grace_minutes) || form.grace_minutes < 0 || form.grace_minutes > 180) {
+      toast.error('Grace minutes must be between 0 and 180'); return;
+    }
+    if (!Number.isFinite(form.streak_days) || form.streak_days < 2 || form.streak_days > 10) {
+      toast.error('Days in a row must be between 2 and 10'); return;
+    }
+    setSaving(true);
+    const { error } = await supabase.from('attendance_settings').upsert(
+      { id: 1, ...form, updated_at: new Date().toISOString(), updated_by: user.id },
+      { onConflict: 'id' }
+    );
+    setSaving(false);
+    if (error) { toast.error(error.message || 'Could not save the rules'); return; }
+    toast.success('Rules saved. They apply to everyone straight away.');
+    setOriginal(form);
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Attendance rules</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {loading ? (
+          <Skeleton className="h-40 w-full" />
+        ) : (
+          <>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <Field label="Shift start">
+                <input type="time" className={INPUT_CLS} value={form.shift_start} onChange={e => set({ shift_start: e.target.value })} />
+              </Field>
+              <Field label="Shift end">
+                <input type="time" className={INPUT_CLS} value={form.shift_end} onChange={e => set({ shift_end: e.target.value })} />
+              </Field>
+              <Field label="Grace minutes (late arrival / early leave)">
+                <input
+                  type="number" min={0} max={180} className={INPUT_CLS}
+                  value={form.grace_minutes} onChange={e => set({ grace_minutes: Number(e.target.value) })}
+                />
+              </Field>
+              <Field label="Check-out before this time becomes a Half Day">
+                <input type="time" className={INPUT_CLS} value={form.halfday_before} onChange={e => set({ halfday_before: e.target.value })} />
+              </Field>
+              <Field label="Ask for confirmation when checking out before">
+                <input type="time" className={INPUT_CLS} value={form.confirm_before} onChange={e => set({ confirm_before: e.target.value })} />
+              </Field>
+              <Field label="Late / early days in a row before the admin is alerted">
+                <input
+                  type="number" min={2} max={10} className={INPUT_CLS}
+                  value={form.streak_days} onChange={e => set({ streak_days: Number(e.target.value) })}
+                />
+              </Field>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox" className="h-4 w-4 accent-blue-600"
+                checked={form.weekly_off_rule} onChange={e => set({ weekly_off_rule: e.target.checked })}
+              />
+              Sunday weekly-off check (no weekly off when absent or on leave on both Saturday and Monday)
+            </label>
+
+            <ul className="list-disc space-y-1 pl-5 text-xs text-slate-500 dark:text-slate-400">
+              <li>Late means checking in at least the grace minutes after the shift start. Leaving early means checking out at least the grace minutes before the shift end.</li>
+              <li>Checking out before the half-day time changes the day to Half Day automatically. The admin can change it back in Records.</li>
+              <li>Late / early days and weekly offs are only highlighted for the admin. They are never changed automatically.</li>
+            </ul>
+
+            <Button onClick={save} disabled={saving || !dirty} className="gap-2">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Save rules
+            </Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 };
 
@@ -1420,18 +1955,28 @@ const AdminAttendancePage: React.FC = () => {
     return () => { off = true; };
   }, []);
 
-  // Number of missing check-outs, shown as a badge on the tab
+  // Items that need the admin's attention, shown as a badge on the Review tab:
+  // missing check-outs + half-day eligible days + Sundays whose weekly off was not earned
   useEffect(() => {
     let off = false;
     (async () => {
-      const { count } = await supabase
-        .from('attendance')
-        .select('id', { count: 'exact', head: true })
-        .not('check_in_at', 'is', null)
-        .is('check_out_at', null)
-        .in('status', ['present', 'halfday'])
-        .lt('date', istToday());
-      if (!off) setPending(count ?? 0);
+      const from = firstOfPreviousMonth();
+      const to = istToday();
+      const [missing, late, weekly] = await Promise.all([
+        supabase
+          .from('attendance')
+          .select('id', { count: 'exact', head: true })
+          .not('check_in_at', 'is', null)
+          .is('check_out_at', null)
+          .in('status', ['present', 'halfday'])
+          .lt('date', to),
+        supabase.rpc('attendance_late_flags', { p_from: from, p_to: to }),
+        supabase.rpc('attendance_weekoff_flags', { p_from: from, p_to: to }),
+      ]);
+      if (off) return;
+      const lateCount = ((late.data as LateFlag[] | null) ?? []).filter(f => f.eligible && !f.reviewed).length;
+      const weekoffCount = ((weekly.data as WeekoffFlag[] | null) ?? []).filter(f => !f.reviewed).length;
+      setPending((missing.count ?? 0) + lateCount + weekoffCount);
     })();
     return () => { off = true; };
   }, [refreshKey]);
@@ -1443,9 +1988,10 @@ const AdminAttendancePage: React.FC = () => {
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'live', label: 'Today (Live)' },
     { id: 'mark', label: 'Mark' },
-    { id: 'fix', label: pending > 0 ? `Missing check-outs (${pending})` : 'Missing check-outs' },
+    { id: 'review', label: pending > 0 ? `Review (${pending})` : 'Review' },
     { id: 'records', label: 'Records / Edit' },
     { id: 'summary', label: 'Monthly Summary' },
+    { id: 'rules', label: 'Rules' },
   ];
 
   return (
@@ -1466,7 +2012,7 @@ const AdminAttendancePage: React.FC = () => {
               tab === t.id
                 ? 'border-blue-600 text-blue-600'
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200',
-              t.id === 'fix' && pending > 0 && tab !== 'fix' && 'text-amber-600'
+              t.id === 'review' && pending > 0 && tab !== 'review' && 'text-amber-600'
             )}
           >
             {t.label}
@@ -1484,11 +2030,12 @@ const AdminAttendancePage: React.FC = () => {
           {tab === 'mark' && (
             <BulkTab employees={employees} refreshKey={refreshKey} onSaved={bump} onSingle={() => openDialog({})} />
           )}
-          {tab === 'fix' && <FixTab employees={employees} refreshKey={refreshKey} onSaved={bump} />}
+          {tab === 'review' && <ReviewTab employees={employees} refreshKey={refreshKey} onSaved={bump} />}
           {tab === 'records' && (
             <RecordsTab employees={employees} refreshKey={refreshKey} onOpen={openDialog} onChanged={bump} />
           )}
           {tab === 'summary' && <SummaryTab employees={employees} refreshKey={refreshKey} onOpen={openDialog} />}
+          {tab === 'rules' && <RulesTab />}
         </>
       )}
 

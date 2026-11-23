@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Archive, Download, Loader2, Trash2, Users, CalendarCheck, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { dayHours, fmtMinutes, workedMinutes } from '@/lib/attendanceRules';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Types + helpers
@@ -65,9 +66,8 @@ const fmt24 = (t: string | null): string => {
 };
 
 const worked = (r: AttRow): string => {
-  if (!r.check_in_at || !r.check_out_at) return '';
-  const mins = Math.max(0, Math.round((new Date(r.check_out_at).getTime() - new Date(r.check_in_at).getTime()) / 60000));
-  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
+  const text = dayHours(r.status, r);
+  return text === '—' ? '' : text;
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -110,10 +110,11 @@ function attendanceSheets(rows: AttRow[], people: Map<string, ProfileRow>) {
     Source: r.source ?? '',
   }));
 
-  const groups = new Map<string, { month: string; emp: string; p: number; h: number; l: number; w: number; o: number; a: number }>();
+  const groups = new Map<string, { month: string; emp: string; p: number; h: number; l: number; w: number; o: number; a: number; wm: number }>();
   rows.forEach(r => {
     const key = `${r.date.slice(0, 7)}|${r.emp_id}`;
-    const g = groups.get(key) ?? { month: r.date.slice(0, 7), emp: r.emp_id, p: 0, h: 0, l: 0, w: 0, o: 0, a: 0 };
+    const g = groups.get(key) ?? { month: r.date.slice(0, 7), emp: r.emp_id, p: 0, h: 0, l: 0, w: 0, o: 0, a: 0, wm: 0 };
+    if (r.status === 'present' || r.status === 'halfday') g.wm += workedMinutes(r) ?? 0;
     if (r.status === 'present') g.p++;
     else if (r.status === 'halfday') g.h++;
     else if (r.status === 'leave') g.l++;
@@ -135,6 +136,7 @@ function attendanceSheets(rows: AttRow[], people: Map<string, ProfileRow>) {
       Holiday: g.o,
       Absent: g.a,
       'Payable Days': g.p + g.l + g.w + g.o + g.h * 0.5,
+      'Working Hours': fmtMinutes(g.wm),
     }));
 
   return { detail, summary };
@@ -272,7 +274,8 @@ const HrBackupPage: React.FC = () => {
         Month: m.month, 'Emp Code': codeOf(m.emp_id), Name: nameOf(m.emp_id),
         Present: m.present_days, 'Half Day': m.half_days, Leave: m.leave_days, 'Week Off': m.weekoff_days,
         Holiday: m.holiday_days, Absent: m.absent_days, 'Payable Days': m.payable_days,
-        'Days In Month': m.days_in_month, 'Not Marked': m.unmarked_days, Final: m.finalized ? 'Yes' : 'No',
+        'Days In Month': m.days_in_month, 'Not Marked': m.unmarked_days, 'Working Hours': fmtMinutes(m.worked_minutes ?? 0),
+        Final: m.finalized ? 'Yes' : 'No',
       }));
 
       const wb = XLSX.utils.book_new();
