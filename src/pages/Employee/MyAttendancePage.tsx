@@ -2,32 +2,21 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
-import { LogIn, LogOut, Clock, CalendarCheck, Loader2, Star } from 'lucide-react';
+import { Star } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import AttendanceTodayCard from '@/components/attendance/AttendanceTodayCard';
+import { avgMinutes, clock12, dayHours, fmtMinutes, istToday } from '@/lib/attendanceRules';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 type Status = 'present' | 'absent' | 'halfday' | 'leave' | 'weekoff' | 'holiday';
-
-interface HistoryRow {
-  month: string;
-  present_days: number;
-  half_days: number;
-  leave_days: number;
-  weekoff_days: number;
-  holiday_days: number;
-  absent_days: number;
-  payable_days: number | string;
-  days_in_month: number;
-}
 
 interface AttendanceRow {
   id: string;
@@ -52,10 +41,25 @@ interface MonthSummary {
   days_in_month: number;
   marked_days: number;
   unmarked_days: number;
+  worked_minutes: number;
+  timed_days: number;
 }
 
-const ROW_COLUMNS =
-  'id,date,status,in_time,out_time,check_in_at,check_out_at,remarks,source';
+interface HistoryRow {
+  month: string;
+  present_days: number;
+  half_days: number;
+  leave_days: number;
+  weekoff_days: number;
+  holiday_days: number;
+  absent_days: number;
+  payable_days: number | string;
+  days_in_month: number;
+  worked_minutes: number | null;
+  timed_days: number | null;
+}
+
+const ROW_COLUMNS = 'id,date,status,in_time,out_time,check_in_at,check_out_at,remarks,source';
 
 const STATUS_META: Record<Status, { label: string; badge: string; cell: string }> = {
   present: {
@@ -91,21 +95,14 @@ const STATUS_META: Record<Status, { label: string; badge: string; cell: string }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers  (all dates are India dates, same as the database)
+// Helpers (all dates are India dates, same as the database)
 // ─────────────────────────────────────────────────────────────────────────────
 const IST = 'Asia/Kolkata';
-
-/** Today's date in India as YYYY-MM-DD */
-const istToday = (): string =>
-  new Date().toLocaleDateString('en-CA', { timeZone: IST });
 
 const monthOf = (dateStr: string): string => dateStr.slice(0, 7);
 
 const monthLabel = (m: string): string =>
-  new Date(`${m}-01T00:00:00`).toLocaleDateString('en-IN', {
-    month: 'long',
-    year: 'numeric',
-  });
+  new Date(`${m}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
 /** Only the current and the previous month are kept in the database (YYYY-MM, newest first) */
 const keptMonths = (today: string): string[] => {
@@ -125,37 +122,14 @@ const nextMonthStart = (m: string): string => {
 
 const fmtIsoTime = (iso: string | null): string =>
   iso
-    ? new Date(iso).toLocaleTimeString('en-IN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-        timeZone: IST,
-      })
+    ? new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: IST })
     : '—';
 
-/** 'HH:MM' (old/imported rows) -> '10:30 AM' */
-const fmt24 = (t: string | null): string => {
-  if (!t) return '—';
-  const m = /^(\d{1,2}):(\d{2})/.exec(t);
-  if (!m) return t;
-  const h = Number(m[1]);
-  return `${h % 12 || 12}:${m[2]} ${h >= 12 ? 'PM' : 'AM'}`;
-};
-
 const inTimeOf = (r: AttendanceRow): string =>
-  r.check_in_at ? fmtIsoTime(r.check_in_at) : fmt24(r.in_time);
+  r.check_in_at ? fmtIsoTime(r.check_in_at) : r.in_time ? clock12(r.in_time) : '—';
 
 const outTimeOf = (r: AttendanceRow): string =>
-  r.check_out_at ? fmtIsoTime(r.check_out_at) : fmt24(r.out_time);
-
-const workedOf = (r: AttendanceRow): string => {
-  if (!r.check_in_at || !r.check_out_at) return '—';
-  const mins = Math.max(
-    0,
-    Math.round((new Date(r.check_out_at).getTime() - new Date(r.check_in_at).getTime()) / 60000)
-  );
-  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
-};
+  r.check_out_at ? fmtIsoTime(r.check_out_at) : r.out_time ? clock12(r.out_time) : '—';
 
 const dayLabel = (dateStr: string): string =>
   new Date(`${dateStr}T00:00:00`).toLocaleDateString('en-IN', {
@@ -193,13 +167,11 @@ const StatCard: React.FC<{
 }> = ({ label, value, tone, highlight }) => (
   <div
     className={cn(
-      'rounded-xl border p-3 sm:p-4 bg-white dark:bg-slate-900 dark:border-slate-800',
-      highlight && 'border-blue-300 bg-blue-50 dark:bg-blue-950/40 dark:border-blue-800'
+      'rounded-xl border bg-white p-3 dark:border-slate-800 dark:bg-slate-900 sm:p-4',
+      highlight && 'border-blue-300 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/40'
     )}
   >
-    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-      {label}
-    </p>
+    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
     <p className={cn('mt-1 text-2xl font-bold tabular-nums', tone)}>{value}</p>
   </div>
 );
@@ -211,56 +183,16 @@ const MyAttendancePage: React.FC = () => {
   const { user } = useAuth();
   const userId = user?.id;
 
-  const [now, setNow] = useState<Date>(() => new Date());
-  const todayStr = useMemo(() => istToday(), [now]); // eslint-disable-line react-hooks/exhaustive-deps
+  const todayStr = istToday();
   const months = useMemo(() => keptMonths(todayStr), [todayStr]);
 
   const [month, setMonth] = useState<string>(() => monthOf(istToday()));
   const [rows, setRows] = useState<AttendanceRow[]>([]);
   const [summary, setSummary] = useState<MonthSummary | null>(null);
-  const [today, setToday] = useState<AttendanceRow | null>(null);
-  const [missedDates, setMissedDates] = useState<string[]>([]);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [loadingMonth, setLoadingMonth] = useState(true);
-  const [loadingToday, setLoadingToday] = useState(true);
-  const [acting, setActing] = useState<'in' | 'out' | null>(null);
 
   const monthReq = useRef(0); // ignore out-of-date responses when the month changes quickly
-
-  // Live clock (once every 30 s is plenty)
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(t);
-  }, []);
-
-  const loadToday = useCallback(async () => {
-    if (!userId) return;
-    const { data, error } = await supabase
-      .from('attendance')
-      .select(ROW_COLUMNS)
-      .eq('emp_id', userId)
-      .eq('date', istToday())
-      .maybeSingle();
-    if (error) {
-      toast.error(error.message || "Could not load today's attendance");
-    } else {
-      setToday((data as AttendanceRow) ?? null);
-    }
-    // Earlier days where the employee checked in but never checked out
-    const missed = await supabase
-      .from('attendance')
-      .select('date')
-      .eq('emp_id', userId)
-      .not('check_in_at', 'is', null)
-      .is('check_out_at', null)
-      .lt('date', istToday())
-      .order('date', { ascending: false })
-      .limit(5);
-    if (!missed.error) {
-      setMissedDates(((missed.data as Array<{ date: string }>) ?? []).map(r => r.date));
-    }
-    setLoadingToday(false);
-  }, [userId]);
 
   const loadMonth = useCallback(
     async (m: string) => {
@@ -294,6 +226,10 @@ const MyAttendancePage: React.FC = () => {
     [userId]
   );
 
+  useEffect(() => {
+    loadMonth(month);
+  }, [loadMonth, month]);
+
   // Earlier months come from the permanent monthly summary (the daily rows are archived)
   useEffect(() => {
     if (!userId) return;
@@ -301,7 +237,7 @@ const MyAttendancePage: React.FC = () => {
     (async () => {
       const { data } = await supabase
         .from('attendance_monthly_summary')
-        .select('month,present_days,half_days,leave_days,weekoff_days,holiday_days,absent_days,payable_days,days_in_month')
+        .select('month,present_days,half_days,leave_days,weekoff_days,holiday_days,absent_days,payable_days,days_in_month,worked_minutes,timed_days')
         .eq('emp_id', userId)
         .order('month', { ascending: false })
         .limit(12);
@@ -309,45 +245,6 @@ const MyAttendancePage: React.FC = () => {
     })();
     return () => { off = true; };
   }, [userId]);
-
-  // Reload "today" at start and again if the India date rolls over while the app is open
-  useEffect(() => {
-    loadToday();
-  }, [loadToday, todayStr]);
-
-  useEffect(() => {
-    loadMonth(month);
-  }, [loadMonth, month]);
-
-  const refreshAll = useCallback(async () => {
-    await Promise.all([loadToday(), loadMonth(month)]);
-  }, [loadToday, loadMonth, month]);
-
-  const handleCheckIn = async () => {
-    if (acting) return;
-    setActing('in');
-    const { error } = await supabase.rpc('attendance_check_in');
-    setActing(null);
-    if (error) {
-      toast.error(error.message || 'Could not check in');
-    } else {
-      toast.success('Checked in ✅');
-    }
-    await refreshAll();
-  };
-
-  const handleCheckOut = async () => {
-    if (acting) return;
-    setActing('out');
-    const { error } = await supabase.rpc('attendance_check_out');
-    setActing(null);
-    if (error) {
-      toast.error(error.message || 'Could not check out');
-    } else {
-      toast.success('Checked out ✅');
-    }
-    await refreshAll();
-  };
 
   // ── Calendar cells ────────────────────────────────────────────────────────
   const calendar = useMemo(() => {
@@ -364,124 +261,14 @@ const MyAttendancePage: React.FC = () => {
     return cells;
   }, [month, rows]);
 
-  const clock = now.toLocaleTimeString('en-IN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-    timeZone: IST,
-  });
-  const dateHeading = new Date(`${todayStr}T00:00:00`).toLocaleDateString('en-IN', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
-
-  // ── Today card state ──────────────────────────────────────────────────────
-  type TodayState = 'none' | 'open' | 'done' | 'admin';
-  const todayState: TodayState = !today
-    ? 'none'
-    : !today.check_in_at
-      ? 'admin'
-      : !today.check_out_at && (today.status === 'present' || today.status === 'halfday')
-        ? 'open'
-        : today.check_out_at
-          ? 'done'
-          : 'admin';
-  const td = today as AttendanceRow; // only read inside branches where todayState !== 'none'
-
   const bonusEligible = month === monthOf(todayStr) && num(summary?.present_days) >= 25;
+  const totalMinutes = summary?.worked_minutes ?? 0;
+  const avg = avgMinutes(totalMinutes, summary?.timed_days);
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-5">
-      {missedDates.length > 0 && (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-          You did not check out on {missedDates.map(d => dayLabel(d)).join(', ')}. Please tell your admin so the correct
-          out time can be added.
-        </div>
-      )}
-
-      {/* ── Today ─────────────────────────────────────────────────────────── */}
-      <Card className="overflow-hidden">
-        <CardHeader className="pb-2">
-          <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base sm:text-lg">
-            <span className="flex items-center gap-2">
-              <CalendarCheck className="h-5 w-5 text-blue-600" />
-              Today's Attendance
-            </span>
-            <span className="flex items-center gap-1.5 text-sm font-medium text-slate-500 dark:text-slate-400">
-              <Clock className="h-4 w-4" />
-              {clock}
-            </span>
-          </CardTitle>
-          <p className="text-sm text-slate-500 dark:text-slate-400">{dateHeading}</p>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
-          {loadingToday ? (
-            <Skeleton className="h-24 w-full rounded-xl" />
-          ) : todayState === 'none' ? (
-            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="font-semibold">Your attendance is not marked yet today</p>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Press Check In when you start work. The time is recorded automatically by the server.
-                </p>
-              </div>
-              <Button
-                onClick={handleCheckIn}
-                disabled={!!acting}
-                className="h-12 w-full gap-2 bg-green-600 px-6 text-base text-white hover:bg-green-700 sm:w-auto"
-              >
-                {acting === 'in' ? <Loader2 className="h-5 w-5 animate-spin" /> : <LogIn className="h-5 w-5" />}
-                Check In
-              </Button>
-            </div>
-          ) : todayState === 'open' ? (
-            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="space-y-1">
-                <StatusBadge status={td.status} />
-                <p className="text-sm">
-                  Check-in: <span className="font-semibold">{inTimeOf(td)}</span>
-                </p>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Remember to press Check Out when you leave.
-                </p>
-              </div>
-              <Button
-                onClick={handleCheckOut}
-                disabled={!!acting}
-                className="h-12 w-full gap-2 bg-orange-600 px-6 text-base text-white hover:bg-orange-700 sm:w-auto"
-              >
-                {acting === 'out' ? <Loader2 className="h-5 w-5 animate-spin" /> : <LogOut className="h-5 w-5" />}
-                Check Out
-              </Button>
-            </div>
-          ) : todayState === 'done' ? (
-            <div className="space-y-1">
-              <StatusBadge status={td.status} />
-              <p className="text-sm">
-                Check-in: <span className="font-semibold">{inTimeOf(td)}</span>
-                {'  •  '}
-                Check-out: <span className="font-semibold">{outTimeOf(td)}</span>
-                {'  •  '}
-                Hours worked: <span className="font-semibold">{workedOf(td)}</span>
-              </p>
-              <p className="text-sm text-green-700 dark:text-green-400">Your day is complete. ✅</p>
-            </div>
-          ) : (
-            <div className="space-y-1">
-              <StatusBadge status={td.status} />
-              {todayState === 'admin' && (
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  This attendance was marked by the admin.
-                  {td.remarks ? ` Remarks: ${td.remarks}` : ''}
-                </p>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* ── Check in / out (same card as on the dashboard) ────────────────── */}
+      <AttendanceTodayCard onChanged={() => loadMonth(month)} />
 
       {/* ── Month picker + summary ────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -509,7 +296,7 @@ const MyAttendancePage: React.FC = () => {
 
       {loadingMonth && !summary ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {Array.from({ length: 8 }).map((_, i) => (
+          {Array.from({ length: 10 }).map((_, i) => (
             <Skeleton key={i} className="h-20 rounded-xl" />
           ))}
         </div>
@@ -528,10 +315,13 @@ const MyAttendancePage: React.FC = () => {
             tone="text-blue-700 dark:text-blue-300"
             highlight
           />
+          <StatCard label="Total Working Hours" value={fmtMinutes(totalMinutes)} tone="text-slate-800 dark:text-slate-100" />
+          <StatCard label="Average Per Day" value={fmtMinutes(avg)} tone="text-slate-800 dark:text-slate-100" />
         </div>
       )}
       <p className="text-xs text-slate-500 dark:text-slate-400">
-        Payable Days = Present + Leave + Week Off + Holiday + (Half Day × 0.5)
+        Payable Days = Present + Leave + Week Off + Holiday + (Half Day × 0.5). Working hours are counted for Present
+        and Half Day days that have both an in time and an out time.
       </p>
 
       {/* ── Calendar ──────────────────────────────────────────────────────── */}
@@ -593,7 +383,7 @@ const MyAttendancePage: React.FC = () => {
                   <TableHead>Status</TableHead>
                   <TableHead>In</TableHead>
                   <TableHead>Out</TableHead>
-                  <TableHead>Hours</TableHead>
+                  <TableHead>Working hours</TableHead>
                   <TableHead>Remarks</TableHead>
                 </TableRow>
               </TableHeader>
@@ -611,7 +401,7 @@ const MyAttendancePage: React.FC = () => {
                       <TableCell><StatusBadge status={r.status} /></TableCell>
                       <TableCell className="whitespace-nowrap">{inTimeOf(r)}</TableCell>
                       <TableCell className="whitespace-nowrap">{outTimeOf(r)}</TableCell>
-                      <TableCell className="whitespace-nowrap">{workedOf(r)}</TableCell>
+                      <TableCell className="whitespace-nowrap">{dayHours(r.status, r)}</TableCell>
                       <TableCell className="max-w-[220px] truncate text-slate-500">{r.remarks || '—'}</TableCell>
                     </TableRow>
                   ))
@@ -640,6 +430,7 @@ const MyAttendancePage: React.FC = () => {
                     <TableHead className="text-center">Week Off</TableHead>
                     <TableHead className="text-center">Holiday</TableHead>
                     <TableHead className="text-center">Absent</TableHead>
+                    <TableHead className="text-center">Hours</TableHead>
                     <TableHead className="text-right">Payable</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -655,6 +446,9 @@ const MyAttendancePage: React.FC = () => {
                         <TableCell className="text-center">{h.weekoff_days}</TableCell>
                         <TableCell className="text-center">{h.holiday_days}</TableCell>
                         <TableCell className="text-center">{h.absent_days}</TableCell>
+                        <TableCell className="whitespace-nowrap text-center">
+                          {h.timed_days ? fmtMinutes(h.worked_minutes) : '—'}
+                        </TableCell>
                         <TableCell className="whitespace-nowrap text-right font-bold tabular-nums">
                           {fmtDays(h.payable_days)} <span className="font-normal text-slate-500">/ {h.days_in_month}</span>
                         </TableCell>

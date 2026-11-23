@@ -20,6 +20,7 @@ import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import confetti from 'canvas-confetti';
 import StatusSelect from '@/components/StatusSelect';
+import AttendanceTodayCard from '@/components/attendance/AttendanceTodayCard';
 
 interface RecentActivity {
   id: string;
@@ -230,6 +231,9 @@ const EmployeeDashboard: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Check in / out sits at the very top of the dashboard */}
+      {profile?.role === 'employee' && <AttendanceTodayCard />}
+
       <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Overview</h1>
